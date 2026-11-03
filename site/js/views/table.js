@@ -33,7 +33,7 @@ export async function render(root, tableId) {
     rolls: new Map(), roster: [], characters: [], npcs: [], handouts: [], secrets: new Map(),
     reveals: [], tables: [], members: [], tableState: null, presence: [], tracks: [],
     active: stored(`as:${tableId}`) || null, // ST: 'npc:<id>' | '<character id>' | null
-    tray: { traits: [], modifier: 0, specialty: '', surge: false, difficulty: '', private: false, label: '', pool: 2, hunger: 0, rouseFirst: 0 },
+    tray: { traits: [], modifier: 0, specialty: '', surge: false, difficulty: '', private: false, label: '', pool: 2, hunger: 0, rouseFirst: 0, showName: false },
     reroll: null, sideTab: stored('side-tab') || 'coterie', mobileTab: 'feed', spotlightSeen: 0,
   };
   let sheet = null;
@@ -93,6 +93,15 @@ export async function render(root, tableId) {
     return id ? s.characters.find((c) => c.id === id) || null : null;
   }
   const activeNpc = () => (isST && s.active?.startsWith('npc:') ? s.npcs.find((n) => n.id === s.active.slice(4)) || null : null);
+  // rolls name an NPC only once it is revealed to this table (public.roller_name)
+  const namedHere = (npc) => s.reveals.some((r) => r.npc_id === npc.id && r.table_id === tableId);
+  function rollAs(value) {
+    s.active = value || null;
+    stored(`as:${tableId}`, s.active);
+    resetTray();
+    drawSheetPane();
+    drawTray();
+  }
 
   // ---------- layout ----------
 
@@ -103,7 +112,7 @@ export async function render(root, tableId) {
   const presence = el('div', { class: 'presence', 'aria-label': 'Who is here' });
   const music = musicDock({ controls: isST ? musicControls() : null });
   // on a phone the sheet and the tray are different tabs: a picked pool can be rolled from the sheet
-  const floatRoll = el('button', { class: 'btn btn-primary float-roll', onclick: () => { s.mobileTab = 'feed'; shell.className = 'table-app mobile-feed'; drawMobileTabs(); rollNow(); } });
+  const floatRoll = el('button', { class: 'btn btn-primary float-roll', onclick: () => { showTab('feed'); rollNow(); } });
   const shell = el('div', { class: `table-app mobile-${s.mobileTab}` },
     el('header', { class: 'table-top' },
       el('a', { class: 'back', href: `#/c/${chronicleId}`, title: 'Back to the chronicle' }, '←', el('span', {}, chronicle?.name || 'Chronicle')),
@@ -112,7 +121,7 @@ export async function render(root, tableId) {
       isST ? el('span', { class: 'badge badge-storyteller' }, 'Storyteller') : null),
     el('div', { class: 'table-grid' }, sheetPane, el('section', { class: 'pane pane-feed' }, feed, tray), side),
     el('nav', { class: 'mobile-tabs' }, [['sheet', 'Sheet'], ['feed', 'Rolls'], ['side', 'Table']].map(([key, label]) =>
-      el('button', { class: key === s.mobileTab ? 'active' : '', onclick: () => { s.mobileTab = key; shell.className = `table-app mobile-${key}`; drawMobileTabs(); } }, label))),
+      el('button', { class: key === s.mobileTab ? 'active' : '', onclick: () => showTab(key) }, label))),
     music.node, floatRoll);
   root.append(shell);
   // the dock floats over the layout; the panes leave room for it (--music-h in app.css)
@@ -123,6 +132,12 @@ export async function render(root, tableId) {
   fit.observe(music.node);
   function drawMobileTabs() {
     shell.querySelectorAll('.mobile-tabs button').forEach((b, i) => b.classList.toggle('active', ['sheet', 'feed', 'side'][i] === s.mobileTab));
+  }
+  // on a phone each pane is a tab: show the one that answers what was just tapped
+  function showTab(tab) {
+    s.mobileTab = tab;
+    shell.className = `table-app mobile-${tab}`;
+    drawMobileTabs();
   }
 
   // ---------- sheet pane ----------
@@ -137,7 +152,7 @@ export async function render(root, tableId) {
         s.npcs.length ? el('optgroup', { label: 'NPCs' }, s.npcs.map((n) => el('option', { value: `npc:${n.id}`, selected: s.active === `npc:${n.id}` }, n.name))) : null,
         el('optgroup', { label: 'Characters at this table' }, s.roster.filter((r) => r.character_id).map((r) =>
           el('option', { value: r.character_id, selected: s.active === r.character_id }, `${r.character_name} (${r.display_name})`))));
-      sel.addEventListener('change', () => { s.active = sel.value || null; stored(`as:${tableId}`, s.active); resetTray(); drawSheetPane(); drawTray(); });
+      sel.addEventListener('change', () => rollAs(sel.value));
       parts.push(el('label', { class: 'field' }, el('span', {}, 'Roll as'), sel));
     }
     const c = activeCharacter();
@@ -159,12 +174,14 @@ export async function render(root, tableId) {
       parts.push(npcCard(npc, el('div', { class: 'stack-tight' },
         el('p', { class: 'small' }, `🔒 Hunger ${secret.hunger ?? 0}`),
         (secret.pools || []).length ? el('div', { class: 'row wrap' }, secret.pools.map((p) => el('button', {
-          class: 'btn btn-small', onclick: () => { s.tray = { ...s.tray, traits: [], pool: p.dice, label: p.label, hunger: secret.hunger ?? 0 }; drawTray(); },
+          class: 'btn btn-small', onclick: () => { s.tray = { ...s.tray, traits: [], pool: p.dice, label: p.label, hunger: secret.hunger ?? 0 }; drawTray(); showTab('feed'); },
         }, `${p.label} ${p.dice}`))) : el('p', { class: 'muted small' }, 'Add quick dice pools to this NPC to roll them in one click.'),
+        el('p', { class: 'muted small' }, namedHere(npc) ? 'Revealed to this table, so its rolls carry its name.'
+          : '🔒 Not revealed to this table, so players see its rolls as “The Storyteller”. Tick “Show the name” on a roll to name it anyway.'),
         secret.notes ? el('details', {}, el('summary', {}, '🔒 Notes'), el('p', { class: 'small pre' }, secret.notes)) : null,
         el('button', { class: 'link-btn', onclick: () => editNpc(chronicleId, npc, refreshLibrary) }, 'Edit NPC'))));
     } else if (isST) {
-      parts.push(el('p', { class: 'muted small' }, 'Rolling free dice as the Storyteller. Pick an NPC above to roll as them; their name shows only if they were revealed to this table.'));
+      parts.push(el('p', { class: 'muted small' }, 'Rolling free dice as the Storyteller. Pick an NPC above to roll as them; their name shows only if they were revealed to this table, or if you tick “Show the name”.'));
     } else {
       const mine = s.characters;
       parts.push(el('div', { class: 'stack' },
@@ -187,7 +204,7 @@ export async function render(root, tableId) {
   // ---------- dice tray ----------
 
   function resetTray() {
-    s.tray = { ...s.tray, traits: [], modifier: 0, specialty: '', surge: false, label: '', rouseFirst: 0 };
+    s.tray = { ...s.tray, traits: [], modifier: 0, specialty: '', surge: false, label: '', rouseFirst: 0, showName: false };
   }
   function togglePick(key) {
     const t = s.tray.traits;
@@ -224,9 +241,7 @@ export async function render(root, tableId) {
     if (p.pool && !keys) toast(`Pick the traits for "${p.pool}" on the sheet.`);
     sheet?.redraw();
     drawTray();
-    s.mobileTab = 'feed';
-    shell.className = 'table-app mobile-feed';
-    drawMobileTabs();
+    showTab('feed');
   }
 
   function drawTray() {
@@ -276,6 +291,8 @@ export async function render(root, tableId) {
     label.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); rollNow(); } });
     const priv = el('label', { class: 'check small', title: isST ? 'Only storytellers see it' : 'Only you and the storytellers see it' },
       el('input', { type: 'checkbox', checked: t.private, onchange: (e) => { t.private = e.target.checked; } }), '🔒 Private');
+    const showName = npc && !namedHere(npc) ? el('label', { class: 'check small', title: 'Players see the name on this roll; the NPC’s card stays hidden' },
+      el('input', { type: 'checkbox', checked: t.showName, onchange: (e) => { t.showName = e.target.checked; } }), `Show the name “${npc.name}”`) : null;
     const rouseFirst = t.rouseFirst && c ? el('label', { class: 'check small' },
       el('input', { type: 'checkbox', checked: true, onchange: (e) => { t.rouseFirst = e.target.checked ? t.rouseFirst : 0; drawTray(); } }),
       `🩸 ${t.rouseFirst} Rouse check${t.rouseFirst > 1 ? 's' : ''} first`) : null;
@@ -298,7 +315,7 @@ export async function render(root, tableId) {
 
     tray.replaceChildren(
       el('div', { class: 'tray-pool' }, chips, usingTraits ? el('button', { class: 'link-btn small', onclick: () => { t.traits = []; t.specialty = ''; t.surge = false; sheet?.redraw(); drawTray(); } }, 'clear') : null),
-      el('div', { class: 'row wrap tray-options' }, modifier, specialty, surge, hungerInput, el('label', { class: 'small inline-field' }, 'Difficulty', difficulty), priv, rouseFirst),
+      el('div', { class: 'row wrap tray-options' }, modifier, specialty, surge, hungerInput, el('label', { class: 'small inline-field' }, 'Difficulty', difficulty), priv, showName, rouseFirst),
       el('div', { class: 'row tray-go' }, label, rollBtn),
       quick || '');
   }
@@ -332,7 +349,7 @@ export async function render(root, tableId) {
       } else if (c) {
         r = await call('roll_pool', { ...common, p_character: c.id, p_pool: Number(t.pool) || 1, p_modifier: t.modifier, p_specialty: specialtyName(t.specialty) });
       } else if (npc) {
-        r = await call('roll_pool', { ...common, p_npc: npc.id, p_pool: Number(t.pool) || 1, p_modifier: t.modifier });
+        r = await call('roll_pool', { ...common, p_npc: npc.id, p_pool: Number(t.pool) || 1, p_modifier: t.modifier, p_as: t.showName && !namedHere(npc) ? npc.name : null });
       } else {
         r = await call('roll_pool', { ...common, p_pool: Number(t.pool) || 1, p_modifier: t.modifier, p_hunger: Number(t.hunger) || 0 });
       }
@@ -369,6 +386,7 @@ export async function render(root, tableId) {
     const rolls = [...s.rolls.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
     feed.replaceChildren(...(rolls.length ? rolls.map((r) => rollCard(r, {
       me: me.id, isST, fresh: r.id === freshId,
+      npcName: isST ? (id) => s.npcs.find((n) => n.id === id)?.name : null,
       rerollFor: s.reroll?.rollId, rerollSelection: s.reroll?.selected,
       onStartReroll: (roll) => { s.reroll = { rollId: roll.id, selected: new Set() }; drawFeed(); },
       onToggleDie: (roll, i) => {
@@ -430,7 +448,7 @@ export async function render(root, tableId) {
       list.length ? list.map((n) => npcCard(n, isST ? el('div', { class: 'stack-tight' },
         revealControl(revealCtx(), { kind: 'npc', id: n.id }, revealedHere('npc', n.id), refreshLibrary),
         el('div', { class: 'row' },
-          el('button', { class: 'link-btn small', onclick: () => { s.active = `npc:${n.id}`; stored(`as:${tableId}`, s.active); resetTray(); drawSheetPane(); drawTray(); } }, 'Roll as'),
+          el('button', { class: 'link-btn small', onclick: () => { rollAs(`npc:${n.id}`); showTab('sheet'); } }, 'Roll as'),
           el('button', { class: 'link-btn small', onclick: () => editNpc(chronicleId, n, refreshLibrary) }, 'Edit'))) : null))
         : el('p', { class: 'muted small' }, isST ? 'No NPCs yet.' : 'Nobody has been revealed to you yet.'));
   }

@@ -34,10 +34,12 @@ function verdict(roll) {
 }
 
 /**
- * opts: { me, isST, rerollSelection: Set|null, onStartReroll, onToggleDie, onConfirmReroll, onCancelReroll, onDifficulty, fresh }
+ * opts: { me, isST, rerollSelection: Set|null, onStartReroll, onToggleDie, onConfirmReroll, onCancelReroll, onDifficulty, fresh,
+ *         npcName: (id) => name, storytellers only: names an NPC whose roll players see as "The Storyteller" }
  */
 export function rollCard(roll, opts = {}) {
   const mine = roll.user_id === opts.me;
+  const asNpc = opts.npcName && roll.npc_id ? opts.npcName(roll.npc_id) : null;
   const selecting = opts.rerollSelection && opts.rerollFor === roll.id;
   // free storyteller dice have no Willpower to spend; characters and NPCs do
   const canReroll = mine && roll.kind === 'pool' && !roll.rerolled && roll.regular.length > 0 && (roll.character_id || roll.npc_id);
@@ -54,6 +56,7 @@ export function rollCard(roll, opts = {}) {
   },
   el('header', { class: 'roll-head' },
     el('span', { class: 'roll-who' }, roll.who),
+    asNpc && asNpc !== roll.who ? el('span', { class: 'chip chip-private', title: `Only storytellers see this; players see “${roll.who}”` }, `🔒 as ${asNpc}`) : null,
     el('span', { class: 'roll-label' }, roll.kind === 'reroll' ? `${roll.label} · Willpower re-roll` : roll.label),
     roll.private ? el('span', { class: 'chip chip-private', title: 'Only the roller and the storytellers see this' }, '🔒 private') : null,
     el('time', { class: 'roll-time', datetime: roll.created_at }, fmtTime(roll.created_at))),

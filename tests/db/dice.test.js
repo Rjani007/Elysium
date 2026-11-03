@@ -66,12 +66,19 @@ test('private rolls are seen by the roller and storytellers only', async () => {
 });
 
 test('an unrevealed NPC rolls as "The Storyteller"; a revealed one by name', async () => {
-  const { st, table, chronicle } = await seatedCharacter();
+  const { st, ana, table, chronicle } = await seatedCharacter();
   const npc = (await st.client.from('npcs').insert({ chronicle_id: chronicle, name: 'Sheriff Kade' }).select()).data[0];
   await st.client.from('npc_secrets').update({ hunger: 3 }).eq('npc_id', npc.id);
   const hidden = await rpc(st, 'roll_pool', { p_table: table, p_npc: npc.id, p_pool: 6 });
   assert.equal(hidden.who, 'The Storyteller');
   assert.equal(hidden.hunger, 3, 'NPC hunger comes from its secrets');
+  // "Show the name" at the table: one roll carries the name, the NPC itself stays hidden
+  const named = await rpc(st, 'roll_pool', { p_table: table, p_npc: npc.id, p_pool: 6, p_as: 'Sheriff Kade' });
+  assert.equal(named.who, 'Sheriff Kade');
+  assert.equal(named.npc_id, npc.id);
+  assert.equal(named.hunger, 3);
+  assert.equal((await rows(ana, 'npcs')).length, 0, 'naming a roll reveals nothing else');
+  assert.notEqual((await rpc(ana, 'roll_pool', { p_table: table, p_pool: 2, p_as: 'The Prince' })).who, 'The Prince', 'players cannot pick a name');
   await st.client.from('reveals').insert({ chronicle_id: chronicle, npc_id: npc.id, table_id: table, revealed_by: st.id });
   assert.equal((await rpc(st, 'roll_pool', { p_table: table, p_npc: npc.id, p_pool: 6 })).who, 'Sheriff Kade');
   assert.equal((await rpc(st, 'roll_pool', { p_table: table, p_pool: 2, p_as: 'A stray dog', p_hunger: 0 })).who, 'A stray dog');
