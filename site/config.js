@@ -7,8 +7,8 @@
 // SETUP.md step 3 says where to find your project's URL and publishable key.
 
 const production = {
-  url: 'https://YOUR-PROJECT-REF.supabase.co',
-  key: 'YOUR-PUBLISHABLE-KEY',
+  url: 'https://ohmarzyfmjpvbrnfcyvr.supabase.co',
+  key: 'sb_publishable_5FWRy5sm33L7kS879W_apg_7RRjKtSw',
 };
 
 // The local stack started by `npm run db:start` (the Supabase CLI's standard local key).
