@@ -54,6 +54,11 @@ async function tables(ctx, redraw) {
   const invites = isST ? await q(sb.from('table_invites').select('*').eq('chronicle_id', chronicle)) : [];
   const name = (id) => ctx.members.find((m) => m.user_id === id)?.display_name || 'Player';
   const link = (code) => `${location.origin}${location.pathname}#/join/${code}`;
+  const renameTable = async (t) => {
+    const n = await promptDialog('Rename table', { value: t.name, maxlength: 60 });
+    if (!n || n === t.name) return;
+    try { await q(sb.from('game_tables').update({ name: n }).eq('id', t.id)); redraw(); } catch (err) { fail(err); }
+  };
 
   const cards = ctx.tables.map((t) => {
     const seated = seats.filter((s) => s.table_id === t.id);
@@ -61,7 +66,7 @@ async function tables(ctx, redraw) {
     const unseated = ctx.members.filter((m) => m.role === 'player' && !seated.some((s) => s.user_id === m.user_id));
     return el('article', { class: 'card stack' },
       el('div', { class: 'row spread' },
-        el('h2', {}, t.name),
+        el('div', { class: 'row' }, el('h2', {}, t.name), isST ? el('button', { class: 'link-btn', onclick: () => renameTable(t) }, 'Rename') : null),
         el('a', { class: 'btn btn-primary', href: `#/t/${t.id}` }, 'Open table →')),
       el('div', { class: 'row wrap' },
         seated.length ? seated.map((s) => el('span', { class: 'chip' }, name(s.user_id),
@@ -89,14 +94,6 @@ async function tables(ctx, redraw) {
             el('button', { class: 'btn btn-small', onclick: async () => { await call('regenerate_invite', { p_table: t.id }).catch(fail); redraw(); } }, 'Make an invite link')),
         el('p', { class: 'muted small' }, 'Anyone with the link can join this chronicle as a player and sit at this table.')) : null,
       isST ? el('div', { class: 'row' },
-        el('button', {
-          class: 'link-btn',
-          onclick: async () => {
-            const n = await promptDialog('Rename table', { value: t.name, maxlength: 60 });
-            if (!n) return;
-            try { await q(sb.from('game_tables').update({ name: n }).eq('id', t.id)); redraw(); } catch (err) { fail(err); }
-          },
-        }, 'Rename'),
         el('button', {
           class: 'link-btn danger',
           onclick: async () => {

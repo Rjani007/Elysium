@@ -78,8 +78,7 @@ export function topbar(...crumbs) {
 export function footer() {
   return el('footer', { class: 'site-foot' },
     el('p', {}, 'Elysium is an unofficial fan tool for Vampire: The Masquerade. Portions of the materials are the copyrights and trademarks of Paradox Interactive AB, and are used with permission. All rights reserved. For more information please visit ',
-      el('a', { href: 'https://www.worldofdarkness.com', target: '_blank', rel: 'noopener' }, 'worldofdarkness.com'), '.'),
-    el('p', {}, 'No rules text lives here: sheets hold names and numbers, and the words are yours. Music plays through YouTube.'));
+      el('a', { href: 'https://www.worldofdarkness.com', target: '_blank', rel: 'noopener' }, 'worldofdarkness.com'), '.'));
 }
 
 async function loadProfile(session) {

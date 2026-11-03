@@ -3,7 +3,7 @@
 // and the database's row level security decides what each browser is sent.
 
 import { sb, q, call, currentUser, syncClock } from '../supa.js';
-import { el, fail, toast, stored, compareNames, initials, confirmDialog } from '../util.js';
+import { el, fail, toast, stored, compareNames, initials, confirmDialog, promptDialog } from '../util.js';
 import { go } from '../main.js';
 import { sheetView } from '../sheet.js';
 import { rollCard } from '../dice.js';
@@ -113,10 +113,12 @@ export async function render(root, tableId) {
   const music = musicDock({ controls: isST ? musicControls() : null });
   // on a phone the sheet and the tray are different tabs: a picked pool can be rolled from the sheet
   const floatRoll = el('button', { class: 'btn btn-primary float-roll', onclick: () => { showTab('feed'); rollNow(); } });
+  const tableName = el('h1', {}, table.name);
   const shell = el('div', { class: `table-app mobile-${s.mobileTab}` },
     el('header', { class: 'table-top' },
       el('a', { class: 'back', href: `#/c/${chronicleId}`, title: 'Back to the chronicle' }, '←', el('span', {}, chronicle?.name || 'Chronicle')),
-      el('h1', {}, table.name),
+      tableName,
+      isST ? el('button', { class: 'icon-btn small', title: 'Rename this table', 'aria-label': 'Rename this table', onclick: () => renameTable() }, '✎') : null,
       presence,
       isST ? el('span', { class: 'badge badge-storyteller' }, 'Storyteller') : null),
     el('div', { class: 'table-grid' }, sheetPane, el('section', { class: 'pane pane-feed' }, feed, tray), side),
@@ -132,6 +134,18 @@ export async function render(root, tableId) {
   fit.observe(music.node);
   function drawMobileTabs() {
     shell.querySelectorAll('.mobile-tabs button').forEach((b, i) => b.classList.toggle('active', ['sheet', 'feed', 'side'][i] === s.mobileTab));
+  }
+  async function renameTable() {
+    const n = await promptDialog('Rename table', { value: table.name, maxlength: 60 });
+    if (!n || n === table.name) return;
+    try {
+      await q(sb.from('game_tables').update({ name: n }).eq('id', tableId));
+      table.name = n;
+      tableName.textContent = n;
+      const listed = s.tables.find((t) => t.id === tableId);
+      if (listed) listed.name = n;
+      drawSide();
+    } catch (err) { fail(err); }
   }
   // on a phone each pane is a tab: show the one that answers what was just tapped
   function showTab(tab) {
