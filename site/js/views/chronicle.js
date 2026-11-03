@@ -1,9 +1,9 @@
 // A chronicle: its tables and invite links, characters, and for storytellers the NPCs,
 // handouts, music and members.
 import { sb, q, call, currentUser } from '../supa.js';
-import { el, fail, toast, copyText, promptDialog, confirmDialog, compareNames, modal, readFileText, downloadJson, fmtDay } from '../util.js';
+import { el, fail, toast, copyText, promptDialog, confirmDialog, compareNames, modal, downloadJson, fmtDay } from '../util.js';
 import { go, topbar } from '../main.js';
-import { importCharacter, exportCharacter, exportFileName } from '../importers.js';
+import { importCharacterFile, exportCharacter, exportFileName, SOURCE_LABEL } from '../importers.js';
 import { blankSheet, youtubeId } from '../v5.js';
 import { mediaImg, mediaUrl, dataUrlToFile, prepareImage, uploadMedia, removeChronicleMedia } from '../media.js';
 import { npcCard, editNpc, editHandout, openHandout, HANDOUT_ICON } from '../library.js';
@@ -128,7 +128,7 @@ async function characters(ctx, redraw) {
   rows.sort((a, b) => compareNames(a.name, b.name));
   const owner = (id) => ctx.members.find((m) => m.user_id === id)?.display_name || 'a former member';
 
-  const fileInput = el('input', { type: 'file', accept: '.json,application/json', hidden: true });
+  const fileInput = el('input', { type: 'file', accept: '.json,application/json,.pdf,application/pdf', hidden: true });
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];
     fileInput.value = '';
@@ -147,7 +147,8 @@ async function characters(ctx, redraw) {
         },
       }, '+ Fill in a blank sheet'),
       fileInput),
-    el('p', { class: 'muted small' }, 'Imports take MundusMaker character files (Export for online play on a V5 sheet) and Progeny saves (Download JSON). ' +
+    el('p', { class: 'muted small' }, 'Imports take MundusMaker character files (⇩ Character file on a V5 sheet), Progeny save files (Save File) ' +
+      'and the official fillable V5 character sheet, filled in and saved as a PDF. ' +
       (isST ? 'You see every character in the chronicle.' : 'Only you and the storytellers see your characters.')),
     rows.length ? el('div', { class: 'cards' }, rows.map((c) => el('a', { class: 'card card-link char-card', href: `#/ch/${c.id}` },
       el('div', { class: 'portrait small' }, c.portrait_path ? mediaImg(c.portrait_path, { alt: '' }) : el('span', {}, '🩸')),
@@ -159,17 +160,13 @@ async function characters(ctx, redraw) {
 }
 
 async function importDialog(ctx, file) {
-  let parsed;
-  try { parsed = importCharacter(JSON.parse(await readFileText(file))); } catch (err) {
-    throw new Error(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
-  }
-  const { name, data, warnings, source, portrait } = parsed;
+  const { name, data, warnings, source, portrait } = await importCharacterFile(new Uint8Array(await file.arrayBuffer()));
   const nameInput = el('input', { value: name, maxlength: 80, required: true });
   const ownerSelect = ctx.isST ? el('select', {}, ctx.members.map((m) => el('option', { value: m.user_id, selected: m.user_id === ctx.me.id }, m.user_id === ctx.me.id ? `${m.display_name} (you)` : m.display_name))) : null;
   const d = data;
   const discs = d.disciplines.map((x) => `${x.name} ${x.rating}`).join(', ');
   const { close } = modal('Import a character', el('div', { class: 'stack' },
-    el('p', { class: 'muted small' }, `From ${source === 'progeny' ? 'Progeny' : 'MundusMaker'}.`),
+    el('p', { class: 'muted small' }, `From ${source === 'manual' ? 'a sheet file' : SOURCE_LABEL[source]}.`),
     el('label', { class: 'field' }, el('span', {}, 'Name'), nameInput),
     ownerSelect ? el('label', { class: 'field' }, el('span', {}, 'Played by'), ownerSelect) : null,
     el('dl', { class: 'facts' },

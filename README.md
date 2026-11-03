@@ -7,9 +7,11 @@ Everyone connects from a browser; the storyteller runs the night.
 - **Chronicles and tables.** Accounts, chronicles with storytellers and players, and
   several tables per chronicle, each with its own players, rolls and reveals. Players join
   with an invite link.
-- **Characters.** Import MundusMaker character files (⇩ Character file on any V5 sheet)
-  or Progeny saves (Download JSON), or fill in a blank sheet. Damage, Hunger, Humanity,
-  Stains and XP are tracked live, and a sheet exports back to MundusMaker after the session.
+- **Characters.** Import MundusMaker character files (⇩ Character file on any V5 sheet),
+  Progeny save files (Save File), or the official fillable V5 character sheet filled in as
+  a PDF, which is read in the browser and never uploaded. Or fill in a blank sheet. Damage,
+  Hunger, Humanity, Stains and XP are tracked live, and a sheet exports back to MundusMaker
+  after the session.
 - **V5 dice, rolled by the server.** Click traits on the sheet to build a pool;
   specialties, Blood Surge, modifiers and Difficulty are one click each. Hunger dice,
   criticals, messy criticals and bestial failures are worked out by the database, so
@@ -59,7 +61,7 @@ npm test
 npm run test:db
 ```
 
-`npm test` checks the importers and text handling. `npm run test:db` runs against the
+`npm test` checks the importers (official sheet PDFs included) and text handling. `npm run test:db` runs against the
 local database and checks the privacy rules, the dice and live updates.
 
 ## License

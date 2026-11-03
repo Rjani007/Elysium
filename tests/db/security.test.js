@@ -61,6 +61,14 @@ test('characters are private to their owner and the storytellers', async () => {
   assert.equal(Object.keys(rosa).includes('data'), false);
 });
 
+test('a character records where it came from, from a fixed list', async () => {
+  const { chronicle, players: [ana] } = await chronicleWith(['Ana']);
+  const id = await rpc(ana, 'create_character', { p_chronicle: chronicle, p_name: 'Rosa', p_data: sheet(), p_source: 'pdf' });
+  const [c] = await rows(ana, 'characters', (q) => q.eq('id', id));
+  assert.equal(c.source, 'pdf');
+  await refused(rpc(ana, 'create_character', { p_chronicle: chronicle, p_name: 'Rosa', p_data: sheet(), p_source: 'roll20' }), /source_check/);
+});
+
 test('sheet edits are validated and clamped by the database', async () => {
   const { chronicle, players: [ana] } = await chronicleWith(['Ana']);
   const id = await rpc(ana, 'create_character', {

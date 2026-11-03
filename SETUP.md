@@ -99,7 +99,8 @@ every push to `main`. The site appears at `https://YOUR-NAME.github.io/elysium/`
 1. Open the site, create your account, and **Start a chronicle**. You are its storyteller.
 2. On the chronicle's **Tables** tab, **Copy invite link** and send it to your players.
    They create an account, take a seat, and import their characters (MundusMaker
-   character files or Progeny JSON), or fill in a blank sheet.
+   character files, Progeny save files, or the official V5 sheet filled in as a PDF), or
+   fill in a blank sheet.
 3. Add NPCs, handouts and music tracks in their tabs. Players see an NPC or handout only
    after you reveal it, to a table or to one player.
 

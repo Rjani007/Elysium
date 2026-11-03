@@ -1,9 +1,9 @@
 // One character's full sheet: portrait, name, export and replace, every field editable.
 import { sb, q, call, currentUser } from '../supa.js';
-import { el, fail, toast, confirmDialog, readFileText, promptDialog } from '../util.js';
+import { el, fail, toast, confirmDialog, promptDialog } from '../util.js';
 import { go, topbar } from '../main.js';
 import { sheetView } from '../sheet.js';
-import { importCharacter } from '../importers.js';
+import { importCharacterFile, SOURCE_LABEL } from '../importers.js';
 import { mediaImg, prepareImage, uploadMedia, removeMedia, removeMediaFolder, ACCEPT_IMAGES } from '../media.js';
 import { exportCharacterFile } from './chronicle.js';
 
@@ -34,18 +34,20 @@ export async function render(root, id) {
   });
 
   const title = el('h1', {}, c.name);
-  const replaceInput = el('input', { type: 'file', accept: '.json,application/json', hidden: true });
+  const replaceInput = el('input', { type: 'file', accept: '.json,application/json,.pdf,application/pdf', hidden: true });
   replaceInput.addEventListener('change', async () => {
     const file = replaceInput.files[0];
     replaceInput.value = '';
     if (!file) return;
     try {
-      const parsed = importCharacter(JSON.parse(await readFileText(file)));
-      if (!await confirmDialog(`Replace ${c.name}'s whole sheet with the one in this file (${parsed.name})? Damage, hunger and XP come from the file too.`, { ok: 'Replace sheet' })) return;
+      const parsed = await importCharacterFile(new Uint8Array(await file.arrayBuffer()));
+      const question = [`Replace ${c.name}'s whole sheet with the one in this file (${parsed.name})? Damage, hunger and XP come from the file too.`,
+        parsed.warnings.length ? el('ul', { class: 'small' }, parsed.warnings.map((w) => el('li', {}, w))) : null];
+      if (!await confirmDialog(question, { ok: 'Replace sheet' })) return;
       const data = await call('replace_character_data', { p_id: c.id, p_data: parsed.data, p_source: parsed.source });
       sheet.update(data);
-      toast(parsed.warnings.length ? `Sheet replaced. ${parsed.warnings.length} thing(s) were skipped.` : 'Sheet replaced.');
-    } catch (err) { fail(err instanceof SyntaxError ? new Error('That file is not valid JSON.') : err); }
+      toast('Sheet replaced.');
+    } catch (err) { fail(err); }
   });
 
   const channel = sb.channel(`character:${c.id}`)
@@ -70,7 +72,7 @@ export async function render(root, id) {
             }, 'Rename')),
           el('p', { class: 'muted small' },
             c.owner_id === me.id ? 'Your character.' : 'You are seeing this as a storyteller.',
-            ` Imported from ${{ mundusmaker: 'MundusMaker', progeny: 'Progeny', manual: 'a blank sheet' }[c.source] || c.source}.`),
+            ` Imported from ${SOURCE_LABEL[c.source] || c.source}.`),
           el('div', { class: 'row wrap' },
             el('button', { class: 'btn', onclick: () => exportCharacterFile({ ...c, data: sheet.data }).catch(fail) }, '⇩ Export for MundusMaker'),
             el('button', { class: 'btn', onclick: () => replaceInput.click() }, '⇪ Replace from a file'),

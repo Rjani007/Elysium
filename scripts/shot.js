@@ -1,21 +1,22 @@
 // Development tool: screenshots of the local site in headless Edge or Chrome, signed in as
 // one of the local test accounts (scripts/seed-local.js). Zero dependencies (Node 22+).
 // Usage: node scripts/shot.js <hash> <out.png> [--as storyteller|ana|ben|none] [--size 1400x900] [--wait ms]
-//                                              [--click "<css selector>"] [--eval "<js>"] ...
+//                                              [--click "<css selector>"] [--eval "<js>"] [--upload <file>] ...
 // Steps run in order after the page settles: --click clicks the first match, --eval runs an
-// expression (promises are awaited). In Git Bash, set MSYS_NO_PATHCONV=1 first, or it
-// rewrites "#/t/..." into a Windows path.
+// expression (promises are awaited), --upload picks a file in the page's first file picker
+// that accepts its extension, as a user would. In Git Bash, set MSYS_NO_PATHCONV=1 first,
+// or it rewrites "#/t/..." into a Windows path.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const flag = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args.splice(i, 2)[1] : dflt; };
 const steps = [];
 for (let i = 0; i < args.length;) {
-  if (args[i] === '--click' || args[i] === '--eval') steps.push([args[i].slice(2), args.splice(i, 2)[1]]);
+  if (args[i] === '--click' || args[i] === '--eval' || args[i] === '--upload') steps.push([args[i].slice(2), args.splice(i, 2)[1]]);
   else i++;
 }
 const who = flag('as', 'storyteller');
@@ -85,8 +86,22 @@ try {
   }
   await send('Page.navigate', { url: `${base}${hash}` });
   await sleep(settle);
+  const upload = async (file) => {
+    const { root } = await send('DOM.getDocument', { depth: 1 });
+    const { nodeIds } = await send('DOM.querySelectorAll', { nodeId: root.nodeId, selector: 'input[type=file]' });
+    const ext = `.${file.split('.').pop().toLowerCase()}`;
+    let target = null;
+    for (const nodeId of nodeIds) {
+      const { attributes } = await send('DOM.getAttributes', { nodeId });
+      const at = attributes.indexOf('accept');
+      if (at >= 0 && attributes[at + 1].toLowerCase().split(',').includes(ext)) { target = nodeId; break; }
+    }
+    if (!target) throw new Error(`no file picker on the page takes ${ext} files`);
+    await send('DOM.setFileInputFiles', { files: [resolve(file)], nodeId: target });
+  };
   for (const [kind, value] of steps) {
-    await evaluate(kind === 'click' ? `document.querySelector(${JSON.stringify(value)})?.click()` : value);
+    if (kind === 'upload') await upload(value);
+    else await evaluate(kind === 'click' ? `document.querySelector(${JSON.stringify(value)})?.click()` : value);
     await sleep(900);
   }
   const shot = await send('Page.captureScreenshot', { format: 'png' });

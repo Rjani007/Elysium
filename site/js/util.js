@@ -140,15 +140,6 @@ export async function copyText(text) {
   }
 }
 
-export function readFileText(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(new Error('Could not read that file.'));
-    r.readAsText(file);
-  });
-}
-
 /**
  * Light markdown for handouts and descriptions: paragraphs, **bold**, *italic*, line breaks.
  * Everything is escaped first, so the only tags that can come out are these four.

@@ -3,7 +3,8 @@
 // Accepted:
 //   * MundusMaker's character file: { format: 'mundusmaker.character', version: 1, system: 'vtm5', name, data, portrait? }
 //   * a MundusMaker entry file (data/worlds/<world>/entities/<id>.json) holding a V5 sheet block
-//   * Progeny's "Download JSON" save (https://progeny.odin-matthias.com), schema versions 1-11
+//   * Progeny's save file, its "Save File" button (https://progeny.odin-matthias.com), schema versions 1-11
+//   * a filled-in official V5 character sheet (PDF), read by officialsheet.js
 // Written:
 //   * the same MundusMaker character file, so a sheet can go back into MundusMaker.
 
@@ -54,8 +55,25 @@ export function importCharacter(obj) {
   }
   if (kind === 'progeny') return { ...fromProgeny(obj), source: 'progeny', portrait: null };
   if (kind === 'sheet') return { ...normalizeSheet(obj), name: text(obj.name, 80).trim() || 'Unnamed', source: 'manual', portrait: null };
-  throw new Error("This doesn't look like a character file. Use a MundusMaker character file (Export for online play) or a Progeny JSON download.");
+  throw new Error("This doesn't look like a character file. Use a MundusMaker character file (⇩ Character file on a V5 sheet), a Progeny save file (Save File) or a filled-in official V5 character sheet (PDF).");
 }
+
+/** A picked file's bytes, a character file (JSON) or a filled-in official V5 sheet (PDF) -> what importCharacter returns. */
+export async function importCharacterFile(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  if (String.fromCharCode(...bytes.subarray(0, 1024)).includes('%PDF-')) {
+    const { characterFromPdf } = await import('./officialsheet.js');
+    return { ...(await characterFromPdf(bytes)), source: 'pdf', portrait: null };
+  }
+  let obj;
+  try { obj = JSON.parse(new TextDecoder().decode(bytes)); } catch {
+    throw new Error("That file isn't a character file or a character sheet PDF.");
+  }
+  return importCharacter(obj);
+}
+
+/** Where a character came from, for "Imported from …". */
+export const SOURCE_LABEL = { mundusmaker: 'MundusMaker', progeny: 'Progeny', pdf: 'a filled-in official character sheet', manual: 'a blank sheet' };
 
 /**
  * Cleans a V5 sheet into the shape the database stores (MundusMaker's vtm5 data):

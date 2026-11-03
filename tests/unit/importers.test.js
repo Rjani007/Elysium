@@ -77,7 +77,7 @@ test('normalizing fixes casing, clamps numbers and drops junk', () => {
   assert.ok(warnings.some((w) => w.includes('Hacking')));
 });
 
-// Shaped like Progeny's "Download JSON" (schema 11 field names; values invented for the test)
+// Shaped like Progeny's save file, its "Save File" button (schema 11 field names; values invented for the test)
 const progeny = {
   id: '', name: 'Viktor Hale', description: 'Ex-cop turned enforcer', sire: 'Unknown', player: 'Sam', chronicle: 'Chicago Nights', sect: 'Anarch',
   clan: 'Ministry', clanBane: 'default',
