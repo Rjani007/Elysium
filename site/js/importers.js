@@ -4,12 +4,13 @@
 //   * MundusMaker's character file: { format: 'mundusmaker.character', version: 1, system: 'vtm5', name, data, portrait? }
 //   * a MundusMaker entry file (data/worlds/<world>/entities/<id>.json) holding a V5 sheet block
 //   * Progeny's save file, its "Save File" button (https://progeny.odin-matthias.com), schema versions 1-11
-//   * a filled-in official V5 character sheet (PDF), read by officialsheet.js
+//   * a filled-in official V5 character sheet or Progeny's "Download PDF", read by officialsheet.js
 // Written:
 //   * the same MundusMaker character file, so a sheet can go back into MundusMaker.
 
 import {
   ATTRIBUTES, SKILLS, DISCIPLINES, CLANS, TEXT_KEYS, LIST_KEYS, blankSheet, int, cap,
+  attr, skill, hunger, humanity, bloodPotency, willpowerMax, specialtiesFor,
 } from './v5.js';
 
 export const EXCHANGE_FORMAT = 'mundusmaker.character';
@@ -55,7 +56,7 @@ export function importCharacter(obj) {
   }
   if (kind === 'progeny') return { ...fromProgeny(obj), source: 'progeny', portrait: null };
   if (kind === 'sheet') return { ...normalizeSheet(obj), name: text(obj.name, 80).trim() || 'Unnamed', source: 'manual', portrait: null };
-  throw new Error("This doesn't look like a character file. Use a MundusMaker character file (⇩ Character file on a V5 sheet), a Progeny save file (Save File) or a filled-in official V5 character sheet (PDF).");
+  throw new Error("This doesn't look like a character file. Use a MundusMaker character file (⇩ Character file on a V5 sheet), a Progeny save file or PDF, or a filled-in official V5 character sheet (PDF).");
 }
 
 /** A picked file's bytes, a character file (JSON) or a filled-in official V5 sheet (PDF) -> what importCharacter returns. */
@@ -70,6 +71,44 @@ export async function importCharacterFile(input) {
     throw new Error("That file isn't a character file or a character sheet PDF.");
   }
   return importCharacter(obj);
+}
+
+// The Attribute each Skill's quick pool uses when an NPC is made from a full sheet: a usual
+// pairing, which the storyteller can change in the NPC editor before saving
+const POOL_ATTRIBUTE = {
+  Athletics: 'dexterity', Brawl: 'strength', Craft: 'dexterity', Drive: 'dexterity', Firearms: 'dexterity', Larceny: 'dexterity', Melee: 'strength', Stealth: 'dexterity', Survival: 'wits',
+  'Animal Ken': 'charisma', Etiquette: 'charisma', Insight: 'wits', Intimidation: 'charisma', Leadership: 'charisma', Performance: 'charisma', Persuasion: 'charisma', Streetwise: 'charisma', Subterfuge: 'manipulation',
+  Academics: 'intelligence', Awareness: 'wits', Finance: 'intelligence', Investigation: 'intelligence', Medicine: 'intelligence', Occult: 'intelligence', Politics: 'intelligence', Science: 'intelligence', Technology: 'intelligence',
+};
+
+/**
+ * A character sheet -> what the NPC editor holds: the card players see once it is revealed
+ * (name, role, clan, description), Hunger, quick pools worked out from the sheet, and the rest
+ * of the sheet summed up in the storyteller-only notes.
+ */
+export function npcFromCharacter(name, d) {
+  const trained = SKILLS.filter((s) => skill(d, s) > 0);
+  const pools = trained.map((s) => ({ label: `${cap(POOL_ATTRIBUTE[s])} + ${s}`, dice: attr(d, POOL_ATTRIBUTE[s]) + skill(d, s) }))
+    .sort((a, b) => b.dice - a.dice).slice(0, 12);
+  pools.push({ label: 'Willpower', dice: willpowerMax(d) });
+  const adv = list(d.advantages);
+  const traits = (flaws) => adv.filter((a) => !!a.flaw === flaws).map((a) => `${a.name} ${int(a.dots, 0, 5, 0)}`).join(', ');
+  const notes = [
+    [d.generation ? `Generation ${d.generation}` : '', `Blood Potency ${bloodPotency(d)}`, `Humanity ${humanity(d)}`, d.predatorType ? `Predator type: ${d.predatorType}` : ''].filter(Boolean).join(' · '),
+    `Attributes: ${ATTRIBUTES.map((a) => `${cap(a)} ${attr(d, a)}`).join(', ')}`,
+    `Skills: ${trained.map((s) => { const sp = specialtiesFor(d, s); return `${s} ${skill(d, s)}${sp.length ? ` (${sp.join(', ')})` : ''}`; }).join(', ') || 'none'}`,
+    list(d.disciplines).length ? `Disciplines: ${list(d.disciplines).map((x) => `${x.name} ${int(x.rating, 0, 5, 0)}${list(x.powers).length ? ` (${list(x.powers).map((p) => p.name).join(', ')})` : ''}`).join('; ')}` : '',
+    list(d.rituals).length ? `Rituals: ${list(d.rituals).map((r) => r.name).join(', ')}` : '',
+    traits(false) ? `Advantages: ${traits(false)}` : '', traits(true) ? `Flaws: ${traits(true)}` : '',
+    list(d.touchstones).length ? `Touchstones: ${list(d.touchstones).map((t) => (t.conviction ? `${t.name} (${t.conviction})` : t.name)).join('; ')}` : '',
+    [d.ambition ? `Ambition: ${d.ambition}` : '', d.desire ? `Desire: ${d.desire}` : '', d.sire ? `Sire: ${d.sire}` : ''].filter(Boolean).join(' · '),
+    d.history || '', d.notes || '',
+  ].filter(Boolean).join('\n');
+  return {
+    name, title: d.concept || '', clan: d.clan || '',
+    description: [d.appearance, d.features].filter(Boolean).join('\n\n'),
+    hunger: hunger(d), pools, notes,
+  };
 }
 
 /** Where a character came from, for "Imported from …". */

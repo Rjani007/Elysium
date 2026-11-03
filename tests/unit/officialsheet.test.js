@@ -2,7 +2,7 @@
 // by the test from the sheet's field names alone; the publisher's file is never needed or shipped.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { characterFromPdf, officialFieldNames } from '../../site/js/officialsheet.js';
+import { characterFromPdf, officialFieldNames, progenyFieldNames } from '../../site/js/officialsheet.js';
 import { importCharacterFile } from '../../site/js/importers.js';
 
 // ---------- a synthetic fillable PDF ----------
@@ -17,15 +17,16 @@ const pdfString = (s) => (/^[\x20-\x7e\n]*$/.test(s)
  * Dotted names become a field tree ("Button7.0" is kid "0" of "Button7"), as on the real sheet.
  * `asOnly` ticks a box through its widget's /AS and leaves /V unset; `widgets: 2` gives a box
  * field two boxes; `caption` is a push button's /MK /CA and `drawn` its appearance's operators.
- * `acroForm: false` drops the form, like a flattened or printed PDF.
+ * `acroForm: false` drops the form, like a flattened or printed PDF. `imagesOver` names fields
+ * to draw a picture over in the page content, the way Progeny ticks Humanity.
  */
-function formPdf(fields, { acroForm = true } = {}) {
+function formPdf(fields, { acroForm = true, imagesOver = [] } = {}) {
   const objs = {
     1: null, 2: '<< /Type /Pages /Kids [4 0 R] /Count 1 >>',
     3: '<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Length 0 >>\nstream\n\nendstream',
   };
   let next = 5;
-  const roots = [], annots = [], nodes = new Map();
+  const roots = [], annots = [], nodes = new Map(), rects = new Map();
   const node = (path) => {
     if (nodes.has(path)) return nodes.get(path);
     const parts = path.split('.'), parent = parts.length > 1 ? node(parts.slice(0, -1).join('.')) : null;
@@ -43,6 +44,7 @@ function formPdf(fields, { acroForm = true } = {}) {
     const n = node(f.name);
     const x = 20 + (i % 10) * 55, y = 760 - (Math.floor(i / 10) % 40) * 10;
     const widget = (k) => `/Rect [${x} ${y - k * 300} ${x + 40} ${y - k * 300 + 8}] /Subtype /Widget /Type /Annot /P 4 0 R`;
+    rects.set(f.name, [x, y, x + 40, y + 8]);
     if (f.type === 'checkbox') {
       const on = !!f.value, look = ` /AS /${on ? 'Yes' : 'Off'} /AP << /N << /Yes 3 0 R /Off 3 0 R >> >>`;
       n.body = f.asOnly ? '/FT /Btn' : `/FT /Btn /V /${on ? 'Yes' : 'Off'}`;
@@ -62,8 +64,17 @@ function formPdf(fields, { acroForm = true } = {}) {
     const kids = kidNums.length ? ` /Kids [${kidNums.map((k) => `${k} 0 R`).join(' ')}]` : '';
     objs[n.num] = `<< /T ${pdfString(n.partial)}${n.parent ? ` /Parent ${n.parent.num} 0 R` : ''}${kids} ${n.body || ''} >>`;
   }
+  // pictures drawn as pdf-lib draws them: q, translate, scale, Do, Q
+  let page = '';
+  if (imagesOver.length) {
+    const img = next++, content = next++;
+    objs[img] = '<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\xff\nendstream';
+    const ops = imagesOver.map((name) => { const [x0, y0, x1, y1] = rects.get(name); return `q\n1 0 0 1 ${x0 + 2} ${y0 + 1} cm\n${x1 - x0 - 4} 0 0 ${y1 - y0 - 2} 0 0 cm\n/Tick Do\nQ`; }).join('\n');
+    objs[content] = `<< /Length ${ops.length} >>\nstream\n${ops}\nendstream`;
+    page = ` /Resources << /XObject << /Tick ${img} 0 R >> >> /Contents ${content} 0 R`;
+  }
   objs[1] = `<< /Type /Catalog /Pages 2 0 R${acroForm ? ` /AcroForm << /Fields [${roots.map((r) => `${r.num} 0 R`).join(' ')}] /DA (/Helv 0 Tf 0 g) >>` : ''} >>`;
-  objs[4] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]${acroForm ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(' ')}]` : ''} >>`;
+  objs[4] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]${page}${acroForm ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(' ')}]` : ''} >>`;
   let out = '%PDF-1.7\n%\xe2\xe3\xcf\xd3\n';
   const offsets = {};
   const size = Math.max(...Object.keys(objs).map(Number)) + 1;
@@ -170,12 +181,92 @@ test('MundusMaker’s drawn Humanity, ticks kept only in /AS, and the shared fif
   assert.equal(d.hunger, 1);
 });
 
-test('empty, flattened, Progeny and unknown PDFs explain themselves', async () => {
+test('empty, flattened and unknown PDFs explain themselves', async () => {
   await assert.rejects(characterFromPdf(officialPdf({})), /still empty/);
+  await assert.rejects(characterFromPdf(progenyPdf({})), /still empty/);
   await assert.rejects(characterFromPdf(formPdf([], { acroForm: false })), /no fillable fields/);
-  await assert.rejects(characterFromPdf(formPdf([{ name: 'Stre-1', type: 'checkbox', value: true }, { name: 'Name', type: 'text', value: 'X' }])), /Progeny/);
-  await assert.rejects(characterFromPdf(formPdf([{ name: 'CharacterName', type: 'text', value: 'X' }])), /isn’t the official/);
+  await assert.rejects(characterFromPdf(formPdf([{ name: 'CharacterName', type: 'text', value: 'X' }])), /isn’t a sheet Elysium knows/);
   await assert.rejects(characterFromPdf(new TextEncoder().encode('%PDF-1.7\nnothing here')), /damaged/);
+});
+
+// ---------- Progeny's PDF ----------
+
+// What Progeny's "Download PDF" fills beyond the names every copy has: merits, and the
+// Health, Willpower and Blood Potency boxes it ticks up to the character's own numbers
+const progenyExtra = () => {
+  const names = [];
+  for (let i = 1; i <= 10; i++) { names.push(`Merit${i}`); for (let l = 1; l <= 5; l++) names.push(`Merit${i}-${l}`); }
+  for (let i = 1; i <= 15; i++) names.push(`Health-${i}`);
+  for (let i = 1; i <= 10; i++) names.push(`WP-${i}`, `BloodPotency-${i}`);
+  return names;
+};
+const progenyFields = (set = {}) => [...progenyFieldNames(), ...progenyExtra()].map((name) => {
+  if (name.startsWith('Humanity-')) return { name, type: 'pushbutton' };
+  if (/-\d+$/.test(name)) return { name, type: 'checkbox', value: !!set[name] };
+  return { name, type: 'text', value: set[name] || '' };
+});
+const progenyPdf = (set, humanity = 0) => formPdf(progenyFields(set), { imagesOver: Array.from({ length: humanity }, (_, i) => `Humanity-${i + 1}`) });
+
+test('Progeny’s PDF imports, with Humanity read from the ticks it draws on the page', async () => {
+  const set = {
+    Name: 'Viktor Hale', pcDescription: 'Bouncer with a past', 'Predator type': 'Alleycat', Ambition: 'Own the club', Clan: 'Brujah', Sire: 'Mara',
+    Desire: 'A quiet night', Title: '12', ClanBane: 'Violent temper', ClanCompulsion: 'Rebellion', BloodSurge: '1', Mend: '1 superficial damage',
+    specBra: 'Grappling', specStree: 'Gangs, Drugs',
+    Disc1: 'Celerity', Disc1_Ability1: 'Cat’s Grace: Keep your balance', Disc1_Ability2: 'Fleetness: Move faster // Dexterity + Athletics // 1 rouse check',
+    Disc2: 'Potence', Disc2_Ability1: 'Lethal Body: Hit harder',
+    Disc3: 'Celerity (cont.)', Disc3_Ability1: 'Blink: Close the distance // Dexterity + Athletics // 2 rouse checks',
+    Disc4: 'Blood sorcery', Disc4_Ability1: 'Corrosive Vitae: Corrode things', Disc4_Ability2: 'Ward against Ghouls: Keep them out // requires: blood; 5 minutes',
+    Merit1: 'Resources: Comfortable', Merit2: 'Prey Exclusion (Mortals): Cannot feed on them',
+    Convictions: 'Never leave a friend behind (Mara)\n\n (Jules)', touchstoneNotes: 'Mara\nher sire\n\nJules\nthe bartender',
+    tEXP: '15 XP', PC_Notes: 'Has a motorbike.',
+  };
+  for (const [k, n] of Object.entries({ Str: 4, Dex: 3, Sta: 3, Cha: 2, Man: 2, Com: 2, Int: 1, Wit: 2, Res: 2, Bra: 3, Stre: 2, Ath: 2, Inti: 2 })) tick(set, `${k}-`, n);
+  tick(set, 'Disc1-', 2); tick(set, 'Disc2-', 1); tick(set, 'Disc3-', 1); tick(set, 'Disc4-', 1);
+  tick(set, 'Merit1-', 3); tick(set, 'Merit2-', 2);
+  tick(set, 'Health-', 7); tick(set, 'WP-', 4); tick(set, 'BloodPotency-', 2);
+
+  const { name, data: d, warnings } = await characterFromPdf(progenyPdf(set, 6));
+  assert.equal(name, 'Viktor Hale');
+  assert.equal(d.concept, 'Bouncer with a past');
+  assert.equal(d.predatorType, 'Alleycat');
+  assert.equal(d.clan, 'Brujah');
+  assert.equal(d.generation, 12, 'Progeny writes the generation in the field named Title');
+  assert.equal(d.bane, 'Violent temper');
+  assert.equal(d.mendAmount, '1 superficial damage');
+  assert.deepEqual(d.attributes, { strength: 4, dexterity: 3, stamina: 3, charisma: 2, manipulation: 2, composure: 2, intelligence: 1, wits: 2, resolve: 2 });
+  assert.equal(d.skills.Brawl, 3);
+  assert.equal(d.skills.Streetwise, 2);
+  assert.equal(d.skills.Firearms, 0);
+  assert.deepEqual(d.specialties, [{ skill: 'Brawl', name: 'Grappling' }, { skill: 'Streetwise', name: 'Gangs' }, { skill: 'Streetwise', name: 'Drugs' }]);
+  assert.deepEqual(d.disciplines, [
+    { name: 'Celerity', rating: 3, powers: [
+      { name: 'Cat’s Grace', level: 1, desc: 'Keep your balance', rouse: 0 },
+      { name: 'Fleetness', level: 2, desc: 'Move faster', pool: 'Dexterity + Athletics', rouse: 1 },
+      { name: 'Blink', level: 3, desc: 'Close the distance', pool: 'Dexterity + Athletics', rouse: 2 },
+    ] },
+    { name: 'Potence', rating: 1, powers: [{ name: 'Lethal Body', level: 1, desc: 'Hit harder', rouse: 0 }] },
+    { name: 'Blood Sorcery', rating: 1, powers: [{ name: 'Corrosive Vitae', level: 1, desc: 'Corrode things', rouse: 0 }] },
+  ]);
+  assert.deepEqual(d.rituals, [{ name: 'Ward against Ghouls', level: 1, desc: 'Keep them out · requires: blood; 5 minutes' }]);
+  assert.deepEqual(d.advantages, [
+    { name: 'Resources', dots: 3, flaw: false, desc: 'Comfortable' }, { name: 'Prey Exclusion (Mortals)', dots: 2, flaw: false, desc: 'Cannot feed on them' },
+  ]);
+  assert.deepEqual(d.convictions, ['Never leave a friend behind']);
+  assert.deepEqual(d.touchstones, [{ name: 'Mara', conviction: 'Never leave a friend behind', desc: 'her sire' }, { name: 'Jules', conviction: '', desc: 'the bartender' }]);
+  assert.equal(d.humanity, 6, 'one tick picture per point of Humanity');
+  assert.equal(d.hunger, 1);
+  assert.deepEqual(d.health, { superficial: 0, aggravated: 0 });
+  assert.equal(d.bloodPotency, 2);
+  assert.equal(d.healthMaxBonus, 1, '7 Health boxes against Stamina 3 + 3');
+  assert.equal(d.willpowerMaxBonus, undefined);
+  assert.equal(d.xp.total, 15);
+  assert.equal(d.notes, 'Has a motorbike.\n\nClan compulsion: Rebellion');
+  assert.ok(warnings.some((w) => /Merits and Flaws together/.test(w)));
+  assert.ok(warnings.some((w) => /doesn’t carry Hunger/.test(w)));
+
+  const unticked = await characterFromPdf(progenyPdf({ Name: 'Ana', 'Str-1': true }));
+  assert.equal(unticked.data.humanity, 7);
+  assert.ok(unticked.warnings.some((w) => /No Humanity boxes/.test(w)));
 });
 
 test('importCharacterFile reads PDFs and character files alike', async () => {

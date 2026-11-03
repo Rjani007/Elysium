@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importCharacter, detectFormat, normalizeSheet, exportCharacter, exportFileName, fromProgeny } from '../../site/js/importers.js';
+import { importCharacter, detectFormat, normalizeSheet, exportCharacter, exportFileName, fromProgeny, npcFromCharacter } from '../../site/js/importers.js';
 import { poolPreview, surgeDice, youtubeId, healthMax, willpowerMax, willpowerLeft } from '../../site/js/v5.js';
 
 // A sheet as MundusMaker's V5 wizard writes it (public/js/sheets/vtm5.js defaults + picks)
@@ -17,6 +17,25 @@ const mundusSheet = {
   xp: { total: 10, spent: 3, ledger: [{ label: 'Skill: Performance (2 → 3)', cost: 9 }] }, notes: 'Lives above the club.',
   bloodSurge: '1', resonance: 'Sanguine',
 };
+
+test('a character sheet becomes an NPC: card, Hunger, quick pools and a summary for the notes', () => {
+  const c = importCharacter({ format: 'mundusmaker.character', version: 1, name: 'Celeste', system: 'vtm5', data: { ...mundusSheet, concept: 'Jazz singer', appearance: 'Sequins' } });
+  const n = npcFromCharacter(c.name, c.data);
+  assert.equal(n.name, 'Celeste');
+  assert.equal(n.title, 'Jazz singer');
+  assert.equal(n.clan, 'Toreador');
+  assert.equal(n.description, 'Sequins');
+  assert.equal(n.hunger, 2);
+  assert.deepEqual(n.pools.slice(0, 3), [{ label: 'Charisma + Performance', dice: 7 }, { label: 'Charisma + Persuasion', dice: 7 }, { label: 'Charisma + Etiquette', dice: 6 }]);
+  assert.equal(n.pools.length, 13, 'the twelve biggest skill pools, then Willpower');
+  assert.deepEqual(n.pools.at(-1), { label: 'Willpower', dice: 5 });
+  assert.match(n.notes, /^Generation 12 · Blood Potency 1 · Humanity 7 · Predator type: Siren$/m);
+  assert.match(n.notes, /Performance 3 \(Singing\)/);
+  assert.match(n.notes, /^Disciplines: Presence 2 \(Awe, Lingering Kiss\); Auspex 1 \(Heightened Senses\)$/m);
+  assert.match(n.notes, /^Advantages: Beautiful 2$/m);
+  assert.match(n.notes, /^Flaws: Enemy 1$/m);
+  assert.match(n.notes, /Lives above the club\.$/);
+});
 
 test('MundusMaker character file imports losslessly', () => {
   const file = { format: 'mundusmaker.character', version: 1, app: 'MundusMaker 1.9.3', name: 'Celeste', system: 'vtm5', data: mundusSheet };

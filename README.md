@@ -8,17 +8,18 @@ Everyone connects from a browser; the storyteller runs the night.
   several tables per chronicle, each with its own players, rolls and reveals. Players join
   with an invite link.
 - **Characters.** Import MundusMaker character files (⇩ Character file on any V5 sheet),
-  Progeny save files (Save File), or the official fillable V5 character sheet filled in as
-  a PDF, which is read in the browser and never uploaded. Or fill in a blank sheet. Damage,
-  Hunger, Humanity, Stains and XP are tracked live, and a sheet exports back to MundusMaker
-  after the session.
+  Progeny save files (Save File) or PDFs (Download PDF), or the official fillable V5
+  character sheet filled in as a PDF; PDFs are read in the browser and never uploaded. Or
+  fill in a blank sheet. Damage, Hunger, Humanity, Stains and XP are tracked live, and a
+  sheet exports back to MundusMaker after the session.
 - **V5 dice, rolled by the server.** Click traits on the sheet to build a pool;
   specialties, Blood Surge, modifiers and Difficulty are one click each. Hunger dice,
   criticals, messy criticals and bestial failures are worked out by the database, so
   nobody can fake a roll. Willpower re-rolls, Rouse checks (with Blood Potency re-rolls),
   Remorse, Willpower and frenzy tests are built in. Private rolls reach only the storyteller.
 - **NPCs and handouts.** The storyteller keeps a library and reveals entries to a whole
-  table or one player; NPC secrets never leave the storyteller's side. "Show everyone now"
+  table or one player; NPC secrets never leave the storyteller's side. A new NPC can be
+  filled in from any character file or sheet PDF the character import takes. "Show everyone now"
   opens a handout on every screen at the table.
 - **Music.** A YouTube playlist per chronicle; press play and everyone at the table hears
   the same track at the same moment, each at their own volume.

@@ -1,8 +1,9 @@
 // NPC and handout editors (storytellers) and the viewers players see once something is revealed.
 import { sb, q } from './supa.js';
 import { el, fail, toast, modal, confirmDialog, richText } from './util.js';
-import { mediaImg, mediaUrl, prepareImage, uploadMedia, removeMedia, ACCEPT_IMAGES, ACCEPT_HANDOUTS } from './media.js';
+import { mediaImg, mediaUrl, prepareImage, uploadMedia, removeMedia, dataUrlToFile, ACCEPT_IMAGES, ACCEPT_HANDOUTS } from './media.js';
 import { CLANS } from './v5.js';
+import { importCharacterFile, npcFromCharacter } from './importers.js';
 
 // ---------- NPCs ----------
 
@@ -30,6 +31,31 @@ export async function editNpc(chronicle, npc = null, onSaved = null) {
       (secrets?.pools || []).map((p) => `${p.label}: ${p.dice}`).join('\n')),
     portrait: el('input', { type: 'file', accept: ACCEPT_IMAGES }),
   };
+  // A new NPC can start from a character sheet: a filled-in V5 sheet PDF, a MundusMaker
+  // character file or a Progeny save. Nothing is saved until "Add NPC".
+  let sheetPortrait = null;
+  const sheetFile = el('input', { type: 'file', accept: '.json,application/json,.pdf,application/pdf', hidden: true });
+  const sheetNote = el('div', {});
+  sheetFile.addEventListener('change', async () => {
+    const file = sheetFile.files[0];
+    sheetFile.value = '';
+    if (!file) return;
+    try {
+      const { name, data, warnings, portrait } = await importCharacterFile(new Uint8Array(await file.arrayBuffer()));
+      const n = npcFromCharacter(name, data);
+      f.name.value = n.name;
+      f.title.value = n.title;
+      f.clan.value = n.clan;
+      f.description.value = n.description;
+      f.notes.value = n.notes;
+      f.hunger.value = n.hunger;
+      f.pools.value = n.pools.map((p) => `${p.label}: ${p.dice}`).join('\n');
+      sheetPortrait = portrait ? dataUrlToFile(portrait) : null;
+      sheetNote.replaceChildren(el('p', { class: 'muted small' }, `Filled in from ${file.name}. Each quick pool pairs a Skill with a usual Attribute; change any before saving.`),
+        warnings.length ? el('details', {}, el('summary', { class: 'small' }, `${warnings.length} thing${warnings.length > 1 ? 's' : ''} to check`),
+          el('ul', {}, warnings.map((w) => el('li', { class: 'small' }, w)))) : '');
+    } catch (err) { fail(err); }
+  });
   const save = el('button', { class: 'btn btn-primary', type: 'submit' }, npc ? 'Save' : 'Add NPC');
   const form = el('form', {
     class: 'stack',
@@ -44,7 +70,7 @@ export async function editNpc(chronicle, npc = null, onSaved = null) {
         const pools = f.pools.value.split('\n').map((line) => line.match(/^\s*(.+?)\s*[:=]\s*(\d{1,2})\s*$/))
           .filter(Boolean).map((m) => ({ label: m[1].slice(0, 60), dice: Math.min(30, Number(m[2])) })).slice(0, 30);
         await q(sb.from('npc_secrets').update({ notes: f.notes.value, hunger: Math.max(0, Math.min(5, Number(f.hunger.value) || 0)), pools }).eq('npc_id', row.id));
-        const file = f.portrait.files[0];
+        const file = f.portrait.files[0] || sheetPortrait;
         if (file) {
           const img = await prepareImage(file, 900);
           const path = await uploadMedia({ chronicle, kind: 'npcs', id: row.id, ...img });
@@ -57,6 +83,11 @@ export async function editNpc(chronicle, npc = null, onSaved = null) {
       } catch (err) { fail(err); save.disabled = false; }
     },
   },
+  npc ? null : el('div', { class: 'stack-tight' },
+    el('div', { class: 'row wrap' },
+      el('button', { class: 'btn btn-small', type: 'button', onclick: () => sheetFile.click() }, '⇪ Fill in from a character sheet…'),
+      el('span', { class: 'muted small' }, 'A filled-in V5 sheet PDF, a MundusMaker character file or a Progeny save'), sheetFile),
+    sheetNote),
   el('fieldset', {}, el('legend', {}, 'What players see once revealed'),
     el('label', { class: 'field' }, el('span', {}, 'Name'), f.name),
     el('div', { class: 'two-col' },

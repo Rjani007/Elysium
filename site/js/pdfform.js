@@ -1,7 +1,8 @@
 // Reads the form fields of a fillable PDF, so a filled-in character sheet can be imported.
 // A reader-only copy of MundusMaker's public/js/sheets/pdfform.js (same author, MIT), plus
-// each widget's caption and, for push buttons, its drawing: the official V5 sheet keeps
-// Humanity in its buttons' captions. Fix a parsing bug in both copies.
+// each widget's caption and, for push buttons, its drawing (the official V5 sheet keeps
+// Humanity in its buttons' captions), and pageImages() for pictures drawn on the pages
+// (Progeny's export ticks Humanity that way). Fix a parsing bug in both copies.
 //
 // Pure module (no DOM): Uint8Array in, plain objects out. Compressed streams use the
 // platform's DecompressionStream, which browsers and Node 18+ provide. Encrypted PDFs are
@@ -518,4 +519,69 @@ export async function readForm(doc) {
     unlisted: fields.length - listed,
     xfa: !!acro?.get('XFA'),
   };
+}
+
+// ---------- pictures drawn on the pages ----------
+
+// [a b c d e f] matrices: m applied first, then n
+const multiply = (m, n) => [m[0] * n[0] + m[1] * n[2], m[0] * n[1] + m[1] * n[3], m[2] * n[0] + m[3] * n[2], m[2] * n[1] + m[3] * n[3],
+  m[4] * n[0] + m[5] * n[2] + n[4], m[4] * n[1] + m[5] * n[3] + n[5]];
+
+async function resourcesOf(doc, node) {
+  for (let depth = 0; isDict(node) && depth < 16; depth++) {
+    const r = await doc.resolve(node.get('Resources'));
+    if (isDict(r)) return r;
+    node = await doc.resolve(node.get('Parent'));
+  }
+  return null;
+}
+
+/**
+ * Where images are drawn on the pages: [{ page, rect: [x0, y0, x1, y1] }] in page space,
+ * the same space as widget rects. Progeny's PDF export marks Humanity by drawing a tick
+ * picture over each box. Follows only q, Q, cm and Do in the page content.
+ */
+export async function pageImages(doc) {
+  const out = [];
+  for (const [page, p] of (await pageList(doc)).entries()) {
+    const xobjects = await doc.resolve((await resourcesOf(doc, p.node))?.get('XObject'));
+    let contents = await doc.resolve(p.node.get('Contents'));
+    contents = Array.isArray(contents) ? contents : contents ? [contents] : [];
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    for (const ref of contents) {
+      const s = await doc.resolve(ref);
+      if (!(s instanceof Stream)) continue;
+      let data;
+      try { data = await decodeStream(s); } catch { continue; }
+      const lx = new Lexer(data, 0);
+      const operands = [];
+      try {
+        for (;;) {
+          lx.skip();
+          if (lx.pos >= data.length) break;
+          const t = lx.object();
+          if (!(t instanceof Keyword)) { operands.push(t); continue; }
+          if (t.word === 'q') stack.push(ctm);
+          else if (t.word === 'Q') ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+          else if (t.word === 'cm' && operands.length >= 6 && operands.slice(-6).every((v) => typeof v === 'number')) ctm = multiply(operands.slice(-6), ctm);
+          else if (t.word === 'Do' && operands[operands.length - 1] instanceof Name) {
+            const x = isDict(xobjects) ? await doc.resolve(xobjects.get(operands[operands.length - 1].name)) : null;
+            if (x instanceof Stream && nameOf(x.dict.get('Subtype')) === 'Image') {
+              // the image fills the unit square, carried to the page by the current matrix
+              const xs = [ctm[4], ctm[0] + ctm[4], ctm[2] + ctm[4], ctm[0] + ctm[2] + ctm[4]];
+              const ys = [ctm[5], ctm[1] + ctm[5], ctm[3] + ctm[5], ctm[1] + ctm[3] + ctm[5]];
+              out.push({ page, rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] });
+            }
+          } else if (t.word === 'ID') {
+            // an inline image's bytes run to the next "EI"
+            const end = indexOf(data, 'EI', lx.pos);
+            lx.pos = end < 0 ? data.length : end + 2;
+          }
+          operands.length = 0;
+        }
+      } catch { /* drawing this reader can't follow: keep what was found */ }
+    }
+  }
+  return out;
 }

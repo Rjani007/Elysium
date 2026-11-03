@@ -144,7 +144,7 @@ async function characters(ctx, redraw) {
         },
       }, '+ Fill in a blank sheet'),
       fileInput),
-    el('p', { class: 'muted small' }, 'Imports take MundusMaker character files (⇩ Character file on a V5 sheet), Progeny save files (Save File) ' +
+    el('p', { class: 'muted small' }, 'Imports take MundusMaker character files (⇩ Character file on a V5 sheet), Progeny save files (Save File) or PDFs (Download PDF), ' +
       'and the official fillable V5 character sheet, filled in and saved as a PDF. ' +
       (isST ? 'You see every character in the chronicle.' : 'Only you and the storytellers see your characters.')),
     rows.length ? el('div', { class: 'cards' }, rows.map((c) => el('a', { class: 'card card-link char-card', href: `#/ch/${c.id}` },
