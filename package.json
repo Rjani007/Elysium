@@ -1,0 +1,25 @@
+{
+  "name": "elysium",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An online table for Vampire: The Masquerade 5th Edition chronicles: live V5 rolls, revealed NPCs and handouts, shared music. Static site on GitHub Pages, data on Supabase.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "serve": "node scripts/serve.js",
+    "vendor": "node scripts/vendor.js",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:db": "node --test --test-concurrency=1 \"tests/db/*.test.js\"",
+    "test:all": "npm test && npm run test:db"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "supabase": "3.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
