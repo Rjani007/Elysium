@@ -29,10 +29,12 @@ npx supabase link --project-ref YOUR-PROJECT-REF
 ```
 
 ```bash
-npx supabase db push
+npx supabase db push --remote
 ```
 
-The project ref is the part of your project URL before `.supabase.co`.
+The project ref is the part of your project URL before `.supabase.co`. The CLI asks for
+no database password; `login` lets it in. Without `--remote`, `db push` updates the local
+test database instead.
 
 **Or by hand:** open **SQL Editor** in the Supabase dashboard, paste the whole migration
 file, and press **Run**. Run it once only; it will complain if the tables already exist.
@@ -61,6 +63,8 @@ In **Authentication → Sign In / Providers → Email**:
 - Turn **Confirm email** off, unless you set up your own email sender (below). Supabase's
   built-in sender only delivers to members of your Supabase team, so your players would
   never receive the confirmation mail.
+- Leave the **Email** provider itself switched on: players sign in with an email address
+  and a password, and nobody can sign in while it is off.
 
 In **Authentication → URL Configuration**:
 
@@ -108,5 +112,6 @@ every push to `main`. The site appears at `https://YOUR-NAME.github.io/elysium/`
   5 GB of downloads a month. Elysium shrinks pictures before upload and the music streams
   from YouTube, so a weekly game uses a small part of that.
 - **Updating the database:** future changes come as new files in `supabase/migrations/`.
-  Apply them with `npx supabase db push` (or paste each new file into the SQL Editor).
+  Apply them with `npx supabase db push --remote` (or paste each new file into the SQL
+  Editor).
 - **Changing the site:** push to `main` and GitHub Pages republishes it.
