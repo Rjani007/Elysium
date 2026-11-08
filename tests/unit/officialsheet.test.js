@@ -198,6 +198,7 @@ const progenyExtra = () => {
   for (let i = 1; i <= 10; i++) { names.push(`Merit${i}`); for (let l = 1; l <= 5; l++) names.push(`Merit${i}-${l}`); }
   for (let i = 1; i <= 15; i++) names.push(`Health-${i}`);
   for (let i = 1; i <= 10; i++) names.push(`WP-${i}`, `BloodPotency-${i}`);
+  names.push('pcConcept', 'Chronicle', 'chronicleTenets', 'Sect', 'Resonance', 'Age', 'Apparent Age', 'Birthday', 'Embrace');
   return names;
 };
 const progenyFields = (set = {}) => [...progenyFieldNames(), ...progenyExtra()].map((name) => {
@@ -209,7 +210,8 @@ const progenyPdf = (set, humanity = 0) => formPdf(progenyFields(set), { imagesOv
 
 test('Progeny’s PDF imports, with Humanity read from the ticks it draws on the page', async () => {
   const set = {
-    Name: 'Viktor Hale', pcDescription: 'Bouncer with a past', 'Predator type': 'Alleycat', Ambition: 'Own the club', Clan: 'Brujah', Sire: 'Mara',
+    Name: 'Viktor Hale', pcDescription: 'Broad, scarred, always in a leather jacket', pcConcept: 'Bouncer with a past', Sect: 'Anarch', Resonance: 'Choleric',
+    'Predator type': 'Alleycat', Ambition: 'Own the club', Clan: 'Brujah', Sire: 'Mara',
     Desire: 'A quiet night', Title: '12', ClanBane: 'Violent temper', ClanCompulsion: 'Rebellion', BloodSurge: '1', Mend: '1 superficial damage',
     specBra: 'Grappling', specStree: 'Gangs, Drugs',
     Disc1: 'Celerity', Disc1_Ability1: 'Cat’s Grace: Keep your balance', Disc1_Ability2: 'Fleetness: Move faster // Dexterity + Athletics // 1 rouse check',
@@ -228,6 +230,9 @@ test('Progeny’s PDF imports, with Humanity read from the ticks it draws on the
   const { name, data: d, warnings } = await characterFromPdf(progenyPdf(set, 6));
   assert.equal(name, 'Viktor Hale');
   assert.equal(d.concept, 'Bouncer with a past');
+  assert.equal(d.appearance, 'Broad, scarred, always in a leather jacket', 'Progeny writes its description in pcDescription');
+  assert.equal(d.sect, 'Anarch');
+  assert.equal(d.resonance, 'Choleric');
   assert.equal(d.predatorType, 'Alleycat');
   assert.equal(d.clan, 'Brujah');
   assert.equal(d.generation, 12, 'Progeny writes the generation in the field named Title');

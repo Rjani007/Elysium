@@ -585,3 +585,124 @@ export async function pageImages(doc) {
   }
   return out;
 }
+
+// ---------- what the pages draw ----------
+
+// WinAnsiEncoding, which the standard fonts use: Latin-1 except 0x80-0x9F
+const WINANSI_HIGH = { 0x80: 0x20AC, 0x82: 0x201A, 0x83: 0x0192, 0x84: 0x201E, 0x85: 0x2026, 0x86: 0x2020, 0x87: 0x2021, 0x88: 0x02C6, 0x89: 0x2030, 0x8A: 0x0160, 0x8B: 0x2039, 0x8C: 0x0152, 0x8E: 0x017D, 0x91: 0x2018, 0x92: 0x2019, 0x93: 0x201C, 0x94: 0x201D, 0x95: 0x2022, 0x96: 0x2013, 0x97: 0x2014, 0x98: 0x02DC, 0x99: 0x2122, 0x9A: 0x0161, 0x9B: 0x203A, 0x9C: 0x0153, 0x9E: 0x017E, 0x9F: 0x0178 };
+const winAnsi = (bytes) => { let s = ''; for (const c of bytes) s += String.fromCharCode(WINANSI_HIGH[c] ?? c); return s; };
+const PAINT = { S: 'stroke', s: 'stroke', f: 'fill', F: 'fill', 'f*': 'fill', B: 'both', 'B*': 'both', b: 'both', 'b*': 'both', n: 'none' };
+
+/**
+ * What each page draws, in page space (points, y up), for sheets that were drawn rather than
+ * filled in (MundusMaker's own sheet PDFs): { width, height, texts: [{ x, y, size, font, text }],
+ * circles: [{ x, y, r, fill }], rects: [{ x0, y0, x1, y1, fill }], lines: [{ x1, y1, x2, y2 }] },
+ * `fill` being the [r, g, b] a shape is filled with, or null when it is only stroked. Text is
+ * read as WinAnsi, the standard fonts' encoding, at the position its text matrix gives (no glyph
+ * advances), and `font` is the font's BaseFont. Other shapes are left out.
+ */
+export async function pageDrawing(doc) {
+  const out = [];
+  for (const p of await pageList(doc)) {
+    const fonts = new Map();
+    const fontDict = await doc.resolve((await resourcesOf(doc, p.node))?.get('Font'));
+    if (isDict(fontDict)) {
+      for (const [key, ref] of fontDict) {
+        const f = await doc.resolve(ref);
+        fonts.set(key, isDict(f) ? nameOf(await doc.resolve(f.get('BaseFont'))) || '' : '');
+      }
+    }
+    const box = p.box.map(Number);
+    const page = { width: box[2] - box[0], height: box[3] - box[1], texts: [], circles: [], rects: [], lines: [] };
+    out.push(page);
+    let contents = await doc.resolve(p.node.get('Contents'));
+    contents = Array.isArray(contents) ? contents : contents ? [contents] : [];
+    const parts = [];
+    for (const ref of contents) {
+      const s = await doc.resolve(ref);
+      if (!(s instanceof Stream)) continue;
+      try { parts.push(await decodeStream(s), Uint8Array.of(10)); } catch { /* a part this reader can't decode */ }
+    }
+    const data = concat(parts);
+
+    let gs = { ctm: [1, 0, 0, 1, 0, 0], fill: [0, 0, 0] };
+    const stack = [];
+    let font = '', size = 0, leading = 0, tm = [1, 0, 0, 1, 0, 0], tlm = tm;
+    let path = [];
+    const at = ([x, y]) => [gs.ctm[0] * x + gs.ctm[2] * y + gs.ctm[4], gs.ctm[1] * x + gs.ctm[3] * y + gs.ctm[5]];
+    const moveText = (tx, ty) => { tlm = multiply([1, 0, 0, 1, tx, ty], tlm); tm = tlm; };
+    const show = (str) => {
+      if (!(str instanceof Str)) return;
+      const m = multiply(tm, gs.ctm);
+      page.texts.push({ x: m[4], y: m[5], size: size * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])), font, text: /Symbol|Dingbats/i.test(font) ? latin1(str.bytes) : winAnsi(str.bytes) });
+    };
+    const paint = (how) => {
+      const fill = how === 'fill' || how === 'both' ? gs.fill : null;
+      for (const sp of how === 'none' ? [] : path) {
+        if (sp.rect) {
+          const [x, y, w, h] = sp.rect;
+          const pts = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(at);
+          const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+          page.rects.push({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), fill });
+        } else if (sp.segs.length === 4 && sp.segs.every((g) => g === 'c')) {
+          // four curves round a point: a circle (or an ellipse, which isn't kept)
+          const pts = sp.pts.map(at), xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+          const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+          if (w > 0 && Math.abs(w - h) <= 0.05 * w) page.circles.push({ x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, r: (w + h) / 4, fill });
+        } else if (sp.segs.length === 1 && sp.segs[0] === 'l') {
+          const [a, b] = sp.pts.map(at);
+          page.lines.push({ x1: a[0], y1: a[1], x2: b[0], y2: b[1] });
+        }
+      }
+      path = [];
+    };
+
+    const lx = new Lexer(data, 0);
+    const ops = [];
+    const num = (i) => Number(ops[ops.length - i]) || 0; // the i-th operand from the end
+    try {
+      for (;;) {
+        lx.skip();
+        if (lx.pos >= data.length) break;
+        const t = lx.object();
+        if (!(t instanceof Keyword)) { ops.push(t); continue; }
+        const w = t.word;
+        if (w === 'q') stack.push(gs);
+        else if (w === 'Q') gs = stack.pop() || gs;
+        else if (w === 'cm' && ops.length >= 6) gs = { ...gs, ctm: multiply([num(6), num(5), num(4), num(3), num(2), num(1)], gs.ctm) };
+        else if (w === 'g' || w === 'rg' || w === 'k' || w === 'sc' || w === 'scn') {
+          const v = ops.filter((o) => typeof o === 'number');
+          if (w === 'g' || v.length === 1) gs = { ...gs, fill: [v[0], v[0], v[0]] };
+          else if (w === 'rg' || v.length === 3) gs = { ...gs, fill: v.slice(0, 3) };
+          else if (v.length === 4) gs = { ...gs, fill: v.slice(0, 3).map((c) => 1 - Math.min(1, c + v[3])) };
+        } else if (w === 'm') path.push({ pts: [[num(2), num(1)]], segs: [] });
+        else if (w === 'l' && path.length) { const sp = path[path.length - 1]; sp.pts.push([num(2), num(1)]); sp.segs.push('l'); }
+        else if ((w === 'c' || w === 'v' || w === 'y') && path.length) {
+          const sp = path[path.length - 1], n = w === 'c' ? 6 : 4;
+          for (let i = n; i >= 2; i -= 2) sp.pts.push([num(i), num(i - 1)]);
+          sp.segs.push('c');
+        } else if (w === 're') path.push({ rect: [num(4), num(3), num(2), num(1)] });
+        else if (PAINT[w]) paint(PAINT[w]);
+        else if (w === 'BT') { tm = [1, 0, 0, 1, 0, 0]; tlm = tm; }
+        else if (w === 'Tf') { font = fonts.get(ops[ops.length - 2]?.name) ?? ''; size = num(1); }
+        else if (w === 'TL') leading = num(1);
+        else if (w === 'Td') moveText(num(2), num(1));
+        else if (w === 'TD') { leading = -num(1); moveText(num(2), num(1)); }
+        else if (w === 'Tm' && ops.length >= 6) { tlm = [num(6), num(5), num(4), num(3), num(2), num(1)]; tm = tlm; }
+        else if (w === 'T*') moveText(0, -leading);
+        else if (w === 'Tj') show(ops[ops.length - 1]);
+        else if (w === "'" || w === '"') { moveText(0, -leading); show(ops[ops.length - 1]); }
+        else if (w === 'TJ' && Array.isArray(ops[ops.length - 1])) {
+          const parts = ops[ops.length - 1].filter((o) => o instanceof Str);
+          show(new Str(concat(parts.map((s) => s.bytes))));
+        } else if (w === 'ID') {
+          // an inline image's bytes run to the next "EI"
+          const end = indexOf(data, 'EI', lx.pos);
+          lx.pos = end < 0 ? data.length : end + 2;
+        }
+        ops.length = 0;
+      }
+    } catch { /* drawing this reader can't follow: keep what was found */ }
+  }
+  return out;
+}

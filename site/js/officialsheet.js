@@ -8,11 +8,13 @@
 // The PDF is read in the browser for its form fields and never uploaded. MundusMaker reads the
 // same two layouts (public/js/sheets/vtmpdfimport.js): if a sheet is revised, change both. Pure
 // (no DOM), so tests run it in Node on PDFs they build themselves. Never commit a publisher's or
-// Progeny's PDF.
+// Progeny's PDF. A PDF with no fields may be MundusMaker's own sheet, which is drawn rather than
+// filled in: drawnsheet.js reads that one.
 
-import { readPdf, readForm, pageImages } from './pdfform.js';
+import { readPdf, readForm, pageImages, pageDrawing } from './pdfform.js';
 import { ATTRIBUTES, SKILLS, cap, healthMax, willpowerMax } from './v5.js';
 import { normalizeSheet } from './importers.js';
+import { characterFromDrawing } from './drawnsheet.js';
 
 // ---------- the official sheet ----------
 
@@ -78,9 +80,16 @@ const PROGENY_SKILLS = {
   Academics: ['Acad', 'specAcad'], Awareness: ['Awar', 'specAwar'], Finance: ['Fina', 'specFina'], Investigation: ['Inve', 'specInve'],
   Medicine: ['Medi', 'specMedi'], Occult: ['Occu', 'specOccu'], Politics: ['Poli', 'specPoli'], Science: ['Scie', 'specScie'], Technology: ['Tech', 'specTech'],
 };
+// Progeny writes the character's description, usually how they look, in pcDescription
 const PROGENY_TEXT = {
-  pcDescription: 'concept', 'Predator type': 'predatorType', Ambition: 'ambition', Clan: 'clan', ClanBane: 'bane', Sire: 'sire', Desire: 'desire',
+  pcDescription: 'appearance', 'Predator type': 'predatorType', Ambition: 'ambition', Clan: 'clan', ClanBane: 'bane', Sire: 'sire', Desire: 'desire',
   BloodSurge: 'bloodSurge', Mend: 'mendAmount', PowBonus: 'powerBonus', ReRouse: 'rouseReroll', FeedPen: 'feedingPenalty', BaneSev: 'baneSeverity',
+};
+// Fields Progeny leaves empty but a player may fill in, read when the PDF has them (not part of
+// recognising one: a real export, checked November 2026, has them all)
+const PROGENY_MORE = {
+  pcConcept: 'concept', Chronicle: 'chronicle', chronicleTenets: 'tenets', Sect: 'sect', Resonance: 'resonance',
+  Age: 'trueAge', 'Apparent Age': 'apparentAge', Birthday: 'dateOfBirth', Embrace: 'dateOfDeath',
 };
 
 /** The field names every Progeny PDF has (303), which is how one is recognised. */
@@ -311,7 +320,7 @@ function readProgeny({ byName, text, ticked, dots }, images) {
     xp: { total: firstNumber(text('tEXP')) ?? 0, spent: 0 },
     notes: [text('PC_Notes'), compulsion ? `Clan compulsion: ${compulsion}` : ''].filter(Boolean).join('\n\n'),
   };
-  for (const [field, key] of Object.entries(PROGENY_TEXT)) { const v = text(field); if (v) sheet[key] = v; }
+  for (const [field, key] of Object.entries({ ...PROGENY_TEXT, ...PROGENY_MORE })) { const v = text(field); if (v) sheet[key] = v; }
   // the sheet ticks the boxes a character has; more than its Attributes give is a bonus (Fortitude, Merits)
   return { name: text('Name'), sheet, warnings, maxima: { health: boxes('Health-'), willpower: boxes('WP-') } };
 }
@@ -330,6 +339,10 @@ function reader(byName) {
 export async function characterFromPdf(bytes) {
   const doc = await readPdf(bytes);
   const form = await readForm(doc);
+  if (!form.fields.length) {
+    const drawn = characterFromDrawing(await pageDrawing(doc));
+    if (drawn) return drawn;
+  }
   if (layoutOf(new Map(form.fields.map((f) => [f.name, f]))) === 'progeny') form.images = await pageImages(doc);
   return characterFromForm(form);
 }
@@ -338,11 +351,11 @@ export async function characterFromPdf(bytes) {
 export function characterFromForm(form) {
   const byName = new Map(form.fields.map((f) => [f.name, f]));
   if (!form.fields.length) {
-    throw new Error('This PDF has no fillable fields, so there is nothing to read: it may have been printed, scanned or flattened. Import the copy you typed into, or fill in a blank sheet here.');
+    throw new Error('This PDF has no fillable fields and isn’t a sheet MundusMaker made, so there is nothing to read: it may have been printed, scanned or flattened. Import the copy you typed into, or fill in a blank sheet here.');
   }
   const layout = layoutOf(byName);
   if (!layout) {
-    throw new Error('This PDF isn’t a sheet Elysium knows: the official fillable V5 character sheet from Renegade Game Studios, or a PDF from Progeny. Import one of those, a MundusMaker character file or a Progeny save file, or fill in a blank sheet here.');
+    throw new Error('This PDF isn’t a sheet Elysium knows: the official fillable V5 character sheet from Renegade Game Studios, a PDF from Progeny, or a V5 sheet PDF from MundusMaker. Import one of those, a MundusMaker character file or a Progeny save file, or fill in a blank sheet here.');
   }
   const read = reader(byName);
   const marked = (f) => f.widgets.some((w) => (w.caption || '').trim() || DRAWN_BOX.test(w.drawn || ''));

@@ -7,9 +7,10 @@ Everyone connects from a browser; the storyteller runs the night.
 - **Chronicles and tables.** Accounts, chronicles with storytellers and players, and
   several tables per chronicle, each with its own players, rolls and reveals. Players join
   with an invite link.
-- **Characters.** Import MundusMaker character files (⇩ Character file on any V5 sheet),
-  Progeny save files (Save File) or PDFs (Download PDF), or the official fillable V5
-  character sheet filled in as a PDF; PDFs are read in the browser and never uploaded. Or
+- **Characters.** Import MundusMaker character files (⇩ Character file on any V5 sheet) or
+  sheet PDFs (Player sheet PDF, in the Familiar layout), Progeny save files (Save File) or
+  PDFs (Download PDF), or the official fillable V5 character sheet filled in as a PDF; PDFs
+  are read in the browser and never uploaded. Or
   fill in a blank sheet. Damage, Hunger, Humanity, Stains and XP are tracked live, and a
   sheet exports back to MundusMaker after the session.
 - **V5 dice, rolled by the server.** Click traits on the sheet to build a pool;
