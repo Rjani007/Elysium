@@ -184,10 +184,82 @@ test('invites: bad codes fail plainly, new codes retire old ones', async () => {
   await refused(rpc(await newUser('Later'), 'join_table', { p_code: fresh }), /not valid/);
 });
 
+test('notes are private to their author, storytellers included', async () => {
+  const { st, chronicle, players: [ana, ben] } = await chronicleWith(['Ana', 'Ben']);
+  const outsider = await newUser('Outsider');
+  const { data: [note], error } = await ana.client.from('notes').insert({ chronicle_id: chronicle, title: 'Clues', body: 'The Prince lied about the fire.' }).select();
+  assert.equal(error, null);
+  assert.equal(note.user_id, ana.id, 'the owner comes from the sign-in');
+
+  assert.equal((await rows(ana, 'notes')).length, 1);
+  assert.equal((await rows(ben, 'notes')).length, 0, 'another player sees nothing');
+  assert.equal((await rows(st, 'notes')).length, 0, 'the storyteller sees nothing either');
+  const { data: changed } = await ben.client.from('notes').update({ body: 'mine now' }).eq('id', note.id).select();
+  assert.equal(changed.length, 0);
+  await ben.client.from('notes').delete().eq('id', note.id);
+  assert.equal((await rows(ana, 'notes'))[0].body, 'The Prince lied about the fire.');
+
+  await refused(ben.client.from('notes').insert({ chronicle_id: chronicle, user_id: ana.id, title: 'forged' }), /permission denied|42501/);
+  await refused(outsider.client.from('notes').insert({ chronicle_id: chronicle, title: 'snooping' }), /row-level security|42501/);
+
+  const { data: [renamed] } = await ana.client.from('notes').update({ title: 'Clues (fire)' }).eq('id', note.id).select();
+  assert.equal(renamed.title, 'Clues (fire)');
+  assert.ok(renamed.updated_at > note.updated_at, 'an edit moves updated_at');
+  await ana.client.from('notes').delete().eq('id', note.id);
+  assert.equal((await rows(ana, 'notes')).length, 0);
+
+  const many = Array.from({ length: 200 }, (_, i) => ({ chronicle_id: chronicle, title: `Note ${i + 1}` }));
+  assert.equal((await ana.client.from('notes').insert(many)).error, null);
+  await refused(ana.client.from('notes').insert({ chronicle_id: chronicle, title: 'One too many' }), /200 notes/);
+});
+
+test('chat: the table reads it, a whisper only its two people, and only send_message writes it', async () => {
+  const { st, chronicle, table, players: [ana, ben] } = await chronicleWith(['Ana', 'Ben']);
+  const table2 = await rpc(st, 'create_table', { p_chronicle: chronicle, p_name: 'Side table' });
+  const [inv2] = await rows(st, 'table_invites', (q) => q.eq('table_id', table2));
+  const cal = await newUser('Cal');
+  await rpc(cal, 'join_table', { p_code: inv2.code });
+  const rosa = await rpc(ana, 'create_character', { p_chronicle: chronicle, p_name: 'Rosa', p_data: sheet() });
+  await rpc(ana, 'choose_character', { p_table: table, p_character: rosa });
+
+  const hello = await rpc(ana, 'send_message', { p_table: table, p_body: '  Evening, all.  ' });
+  assert.equal(hello.body, 'Evening, all.');
+  assert.equal(hello.who, 'Ana');
+  assert.equal(hello.character_name, 'Rosa', 'a message carries the character played at this table');
+  const toSt = await rpc(ana, 'send_message', { p_table: table, p_body: 'I use Auspex on him.', p_to: st.id });
+  const toBen = await rpc(st, 'send_message', { p_table: table, p_body: 'You feel watched.', p_to: ben.id });
+
+  const ids = async (u) => (await rows(u, 'messages', (q) => q.eq('table_id', table))).map((m) => m.id).sort();
+  assert.deepEqual(await ids(ana), [hello.id, toSt.id].sort());
+  assert.deepEqual(await ids(ben), [hello.id, toBen.id].sort());
+  assert.deepEqual(await ids(st), [hello.id, toSt.id, toBen.id].sort(), 'the storyteller reads the whispers sent to or by them');
+  assert.equal((await rows(cal, 'messages')).length, 0, 'another table hears nothing');
+
+  await refused(rpc(ana, 'send_message', { p_table: table, p_body: 'psst', p_to: cal.id }), /isn't at this table/);
+  await refused(rpc(ana, 'send_message', { p_table: table, p_body: 'psst', p_to: ana.id }), /whisper to yourself/);
+  await refused(rpc(cal, 'send_message', { p_table: table, p_body: 'hi' }), /not at this table/);
+  await refused(rpc(ana, 'send_message', { p_table: table, p_body: '   ' }), /Write something/);
+  await refused(rpc(ana, 'send_message', { p_table: table, p_body: 'x'.repeat(1001) }), /too long/);
+  await refused(ana.client.from('messages').insert({ table_id: table, chronicle_id: chronicle, who: 'Ana', body: 'forged' }), /permission denied|42501/);
+
+  await ben.client.from('messages').delete().eq('id', hello.id);
+  assert.ok((await ids(ana)).includes(hello.id), 'a player can\'t delete someone else\'s message');
+  const mine = await rpc(ben, 'send_message', { p_table: table, p_body: 'Oops' });
+  await ben.client.from('messages').delete().eq('id', mine.id);
+  await st.client.from('messages').delete().eq('id', hello.id);
+  assert.deepEqual(await ids(ben), [toBen.id], 'senders delete their own, storytellers anyone\'s');
+});
+
+test('chat refuses a flood', async () => {
+  const { table, players: [ana] } = await chronicleWith(['Ana']);
+  for (let i = 0; i < 10; i++) await rpc(ana, 'send_message', { p_table: table, p_body: `line ${i}` });
+  await refused(rpc(ana, 'send_message', { p_table: table, p_body: 'one more' }), /Slow down/);
+});
+
 test('nothing is readable without signing in', async () => {
   await chronicleWith(['Ana']);
   const guest = createClient(localEnv().url, localEnv().anon, { auth: { persistSession: false } });
-  for (const t of ['chronicles', 'game_tables', 'characters', 'npcs', 'handouts', 'rolls', 'profiles']) {
+  for (const t of ['chronicles', 'game_tables', 'characters', 'npcs', 'handouts', 'rolls', 'profiles', 'notes', 'messages']) {
     const { data, error } = await guest.from(t).select('*');
     assert.ok(error || data.length === 0, `${t} leaked to a signed-out visitor`);
   }

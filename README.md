@@ -22,6 +22,12 @@ Everyone connects from a browser; the storyteller runs the night.
   table or one player; NPC secrets never leave the storyteller's side. A new NPC can be
   filled in from any character file or sheet PDF the character import takes. "Show everyone now"
   opens a handout on every screen at the table.
+- **Chat.** Messages appear in the table's feed between the rolls, with the character's
+  name. Whisper to one person at the table, the storyteller included, and only the two of
+  you see it. Senders and storytellers can delete messages.
+- **Notes.** Everyone, players and storytellers alike, keeps private notes for each
+  chronicle, on the chronicle page and in a tab at the table. Nobody else can read them,
+  and they save as you type.
 - **Music.** A YouTube playlist per chronicle; press play and everyone at the table hears
   the same track at the same moment, each at their own volume.
 

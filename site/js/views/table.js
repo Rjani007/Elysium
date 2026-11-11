@@ -1,9 +1,9 @@
-// The live table: your sheet and dice tray, the shared roll feed, the coterie, revealed
-// Kindred and handouts, and the music. Everything arrives through one realtime channel,
-// and the database's row level security decides what each browser is sent.
+// The live table: your sheet and dice tray, the shared feed of rolls and chat, the coterie,
+// revealed Kindred and handouts, your notes, and the music. Everything arrives through one
+// realtime channel, and the database's row level security decides what each browser is sent.
 
 import { sb, q, call, currentUser, syncClock } from '../supa.js';
-import { el, fail, toast, stored, compareNames, initials, confirmDialog, promptDialog } from '../util.js';
+import { el, fail, toast, stored, compareNames, initials, confirmDialog, promptDialog, fmtTime } from '../util.js';
 import { go } from '../main.js';
 import { sheetView } from '../sheet.js';
 import { rollCard } from '../dice.js';
@@ -11,11 +11,13 @@ import { musicDock } from '../music.js';
 import { npcCard, openHandout, editNpc, editHandout, HANDOUT_ICON } from '../library.js';
 import { revealControl } from '../reveal.js';
 import { mediaImg } from '../media.js';
+import { notesPanel } from '../notes.js';
 import {
   ATTRIBUTES, SKILLS, DISCIPLINES, cap, poolPreview, specialtiesFor, surgeDice, traitInfo, traitKey, hunger as hungerOf,
 } from '../v5.js';
 
 const FEED_SIZE = 80;
+const CHAT_SIZE = 100;
 
 export async function render(root, tableId) {
   const me = currentUser();
@@ -35,6 +37,7 @@ export async function render(root, tableId) {
     active: stored(`as:${tableId}`) || null, // ST: 'npc:<id>' | '<character id>' | null
     tray: { traits: [], modifier: 0, specialty: '', surge: false, difficulty: '', private: false, label: '', pool: 2, hunger: 0, rouseFirst: 0, showName: false },
     reroll: null, sideTab: stored('side-tab') || 'coterie', mobileTab: 'feed', spotlightSeen: 0,
+    messages: new Map(), storytellers: [], unread: false,
   };
   let sheet = null;
 
@@ -79,8 +82,17 @@ export async function render(root, tableId) {
   async function loadState() {
     s.tableState = (await q(sb.from('table_state').select('*').eq('table_id', tableId)))[0] || null;
   }
+  async function loadMessages() {
+    const rows = await q(sb.from('messages').select('*').eq('table_id', tableId).order('created_at', { ascending: false }).limit(CHAT_SIZE));
+    s.messages = new Map(rows.reverse().map((m) => [m.id, m]));
+  }
+  // everyone at the table can whisper to the storytellers, so everyone loads who they are
+  async function loadStorytellers() {
+    const rows = await q(sb.from('chronicle_members').select('user_id, profile:profiles(display_name)').eq('chronicle_id', chronicleId).eq('role', 'storyteller'));
+    s.storytellers = rows.map((m) => ({ user_id: m.user_id, display_name: m.profile?.display_name || 'Storyteller' }));
+  }
   async function loadAll() {
-    await Promise.all([loadRolls(), loadRoster(), loadCharacters(), loadLibrary(), loadStoryteller(), loadState()]);
+    await Promise.all([loadRolls(), loadMessages(), loadRoster(), loadStorytellers(), loadCharacters(), loadLibrary(), loadStoryteller(), loadState()]);
   }
   await loadAll();
 
@@ -105,10 +117,23 @@ export async function render(root, tableId) {
 
   // ---------- layout ----------
 
-  const feed = el('div', { class: 'feed', role: 'log', 'aria-label': 'Rolls', 'aria-live': 'polite' });
+  const feed = el('div', { class: 'feed', role: 'log', 'aria-label': 'Rolls and chat', 'aria-live': 'polite' });
   const sheetPane = el('aside', { class: 'pane pane-sheet', 'aria-label': 'Sheet' });
   const tray = el('div', { class: 'tray' });
   const side = el('aside', { class: 'pane pane-side', 'aria-label': 'Table' });
+  // the chat box sits between the feed and the dice tray; Enter sends, Shift+Enter starts a new line
+  const chatInput = el('textarea', {
+    class: 'chat-input', rows: 1, maxlength: 1000, placeholder: 'Message the table…', 'aria-label': 'Message',
+    onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); } },
+    oninput: () => fitChatInput(),
+  });
+  const chatTo = el('select', { class: 'chat-to', 'aria-label': 'Send to', title: 'Who reads it', onchange: () => drawWhisper() });
+  const chatForm = el('form', { class: 'chat-form', onsubmit: (e) => { e.preventDefault(); sendMessage(); } },
+    chatTo, chatInput, el('button', { class: 'btn btn-small', type: 'submit' }, 'Send'));
+  const notes = notesPanel(chronicleId);
+  const notesBody = el('div', { class: 'side-body' }, notes.node);
+  // below this width the feed is one of the tabs, so a message can arrive while it is hidden
+  const narrow = window.matchMedia('(max-width: 1100px)');
   const presence = el('div', { class: 'presence', 'aria-label': 'Who is here' });
   const music = musicDock({ controls: isST ? musicControls() : null });
   // on a phone the sheet and the tray are different tabs: a picked pool can be rolled from the sheet
@@ -121,8 +146,8 @@ export async function render(root, tableId) {
       isST ? el('button', { class: 'icon-btn small', title: 'Rename this table', 'aria-label': 'Rename this table', onclick: () => renameTable() }, '✎') : null,
       presence,
       isST ? el('span', { class: 'badge badge-storyteller' }, 'Storyteller') : null),
-    el('div', { class: 'table-grid' }, sheetPane, el('section', { class: 'pane pane-feed' }, feed, tray), side),
-    el('nav', { class: 'mobile-tabs' }, [['sheet', 'Sheet'], ['feed', 'Rolls'], ['side', 'Table']].map(([key, label]) =>
+    el('div', { class: 'table-grid' }, sheetPane, el('section', { class: 'pane pane-feed' }, feed, chatForm, tray), side),
+    el('nav', { class: 'mobile-tabs' }, [['sheet', 'Sheet'], ['feed', 'Feed'], ['side', 'Table']].map(([key, label]) =>
       el('button', { class: key === s.mobileTab ? 'active' : '', onclick: () => showTab(key) }, label))),
     music.node, floatRoll);
   root.append(shell);
@@ -133,7 +158,11 @@ export async function render(root, tableId) {
   });
   fit.observe(music.node);
   function drawMobileTabs() {
-    shell.querySelectorAll('.mobile-tabs button').forEach((b, i) => b.classList.toggle('active', ['sheet', 'feed', 'side'][i] === s.mobileTab));
+    shell.querySelectorAll('.mobile-tabs button').forEach((b, i) => {
+      const key = ['sheet', 'feed', 'side'][i];
+      b.classList.toggle('active', key === s.mobileTab);
+      b.classList.toggle('unread', key === 'feed' && s.unread);
+    });
   }
   async function renameTable() {
     const n = await promptDialog('Rename table', { value: table.name, maxlength: 60 });
@@ -150,6 +179,7 @@ export async function render(root, tableId) {
   // on a phone each pane is a tab: show the one that answers what was just tapped
   function showTab(tab) {
     s.mobileTab = tab;
+    if (tab === 'feed') s.unread = false;
     shell.className = `table-app mobile-${tab}`;
     drawMobileTabs();
   }
@@ -397,8 +427,8 @@ export async function render(root, tableId) {
 
   function drawFeed(freshId = null) {
     const nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120;
-    const rolls = [...s.rolls.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    feed.replaceChildren(...(rolls.length ? rolls.map((r) => rollCard(r, {
+    const items = [...s.rolls.values(), ...s.messages.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    feed.replaceChildren(...(items.length ? items.map((r) => (s.messages.has(r.id) ? chatLine(r) : rollCard(r, {
       me: me.id, isST, fresh: r.id === freshId,
       npcName: isST ? (id) => s.npcs.find((n) => n.id === id)?.name : null,
       rerollFor: s.reroll?.rollId, rerollSelection: s.reroll?.selected,
@@ -417,22 +447,116 @@ export async function render(root, tableId) {
         drawFeed();
       }),
       onDifficulty: (roll, d) => busy(async () => addRoll(await call('set_roll_difficulty', { p_roll: roll.id, p_difficulty: d }), false)),
-    })) : [el('p', { class: 'muted center feed-empty' }, 'No rolls yet. The night is young.')]));
+    }))) : [el('p', { class: 'muted center feed-empty' }, 'Nothing yet. The night is young.')]));
     if (nearBottom || freshId) feed.scrollTop = feed.scrollHeight;
+  }
+
+  // ---------- chat ----------
+
+  const isStoryteller = (id) => s.storytellers.some((p) => p.user_id === id);
+  function personName(id) {
+    const st = s.storytellers.find((p) => p.user_id === id);
+    if (st) return st.display_name;
+    const r = s.roster.find((x) => x.user_id === id);
+    return r ? r.character_name || r.display_name : 'someone';
+  }
+
+  function chatLine(m) {
+    const mine = m.user_id === me.id;
+    const whisper = m.to_user ? (m.to_user === me.id ? 'whispers to you' : `to ${personName(m.to_user)}`) : '';
+    return el('div', { class: `chat${mine ? ' chat-mine' : ''}${m.to_user ? ' chat-whisper' : ''}` },
+      el('div', { class: 'chat-head' },
+        el('span', { class: 'chat-who' }, m.character_name || m.who),
+        m.character_name ? el('span', { class: 'muted small' }, m.who) : null,
+        isStoryteller(m.user_id) ? el('span', { class: 'chat-st' }, 'Storyteller') : null,
+        whisper ? el('span', { class: 'chat-to-label' }, `🔒 ${whisper}`) : null,
+        el('span', { class: 'chat-meta' },
+          el('time', { class: 'chat-time', datetime: m.created_at }, fmtTime(m.created_at)),
+          mine || isST ? el('button', { class: 'chat-del', type: 'button', title: 'Delete this message', 'aria-label': 'Delete this message', onclick: () => deleteMessage(m) }, '×') : null)),
+      el('p', { class: 'chat-body' }, m.body));
+  }
+
+  // "Everyone at the table", or a whisper to one person here
+  function drawChatTo() {
+    const keep = chatTo.value;
+    const people = [
+      ...s.storytellers.filter((p) => p.user_id !== me.id).map((p) => [p.user_id, `${p.display_name} (Storyteller)`]),
+      ...s.roster.filter((r) => r.user_id !== me.id && !isStoryteller(r.user_id))
+        .map((r) => [r.user_id, r.character_name ? `${r.character_name} (${r.display_name})` : r.display_name]),
+    ];
+    chatTo.replaceChildren(el('option', { value: '' }, 'Everyone'),
+      people.length ? el('optgroup', { label: 'Whisper to' }, people.map(([id, label]) => el('option', { value: id }, `🔒 ${label}`))) : null);
+    chatTo.value = people.some(([id]) => id === keep) ? keep : '';
+    drawWhisper();
+  }
+  // a whisper stays picked for the next message too, so the box says plainly who will read it
+  function drawWhisper() {
+    chatInput.placeholder = chatTo.value ? `Whisper to ${personName(chatTo.value)}…` : 'Message the table…';
+    chatForm.classList.toggle('whispering', !!chatTo.value);
+  }
+
+  function fitChatInput() {
+    chatInput.style.height = 'auto';
+    chatInput.style.height = `${Math.min(chatInput.scrollHeight, 120)}px`;
+    chatInput.style.overflowY = chatInput.scrollHeight > 120 ? 'auto' : 'hidden';
+  }
+
+  let sending = false;
+  async function sendMessage() {
+    const body = chatInput.value.trim();
+    if (!body || sending) return;
+    sending = true;
+    try {
+      addMessage(await call('send_message', { p_table: tableId, p_body: body, p_to: chatTo.value || null }));
+      chatInput.value = '';
+      fitChatInput();
+    } catch (err) { fail(err); } finally { sending = false; chatInput.focus(); }
+  }
+
+  function addMessage(m, live = false) {
+    const known = s.messages.has(m.id);
+    s.messages.set(m.id, m);
+    if (!known && s.messages.size > CHAT_SIZE * 2) s.messages.delete(s.messages.keys().next().value);
+    if (!known && live && m.user_id !== me.id && narrow.matches && s.mobileTab !== 'feed') {
+      s.unread = true;
+      drawMobileTabs();
+      if (m.to_user === me.id) toast(`🔒 ${m.character_name || m.who} whispered to you.`);
+    }
+    // your own message brings the feed to the bottom; someone else's only if you were there already
+    drawFeed(!known && m.user_id === me.id ? m.id : null);
+  }
+
+  async function deleteMessage(m) {
+    if (!await confirmDialog(m.user_id === me.id ? 'Delete your message?' : `Delete this message from ${m.character_name || m.who}?`, { ok: 'Delete', danger: true })) return;
+    try {
+      await q(sb.from('messages').delete().eq('id', m.id));
+      s.messages.delete(m.id);
+      drawFeed();
+    } catch (err) { fail(err); }
   }
 
   // ---------- side panel ----------
 
   function drawSide() {
-    const tabs = [['coterie', 'Coterie'], ['kindred', 'Kindred'], ['handouts', 'Handouts'], ...(isST ? [['music', 'Music']] : [])];
+    const tabs = [['coterie', 'Coterie'], ['kindred', 'Kindred'], ['handouts', 'Handouts'], ['notes', 'Notes'], ...(isST ? [['music', 'Music']] : [])];
     if (!tabs.some(([k]) => k === s.sideTab)) s.sideTab = 'coterie';
-    const body = el('div', { class: 'side-body' }, ({ coterie, kindred, handouts: handoutsTab, music: musicTab })[s.sideTab]());
-    side.replaceChildren(
-      el('nav', { class: 'tabs tabs-small', role: 'tablist' }, tabs.map(([k, label]) => el('button', {
-        role: 'tab', class: k === s.sideTab ? 'active' : '', 'aria-selected': String(k === s.sideTab),
-        onclick: () => { s.sideTab = k; stored('side-tab', k); drawSide(); },
-      }, label, k === 'handouts' && !isST ? ` ${visibleHandouts().length || ''}` : ''))),
-      body);
+    const nav = el('nav', { class: 'tabs tabs-small', role: 'tablist' }, tabs.map(([k, label]) => el('button', {
+      role: 'tab', class: k === s.sideTab ? 'active' : '', 'aria-selected': String(k === s.sideTab),
+      onclick: () => {
+        const opening = k === 'notes' && s.sideTab !== 'notes';
+        s.sideTab = k;
+        stored('side-tab', k);
+        drawSide();
+        if (opening) notes.refresh();
+      },
+    }, label, k === 'handouts' && !isST ? ` ${visibleHandouts().length || ''}` : '')));
+    if (s.sideTab === 'notes') {
+      // a note being written keeps its text, cursor and focus: only the tabs above it redraw
+      if (side.lastChild === notesBody) side.firstChild.replaceWith(nav);
+      else side.replaceChildren(nav, notesBody);
+      return;
+    }
+    side.replaceChildren(nav, el('div', { class: 'side-body' }, ({ coterie, kindred, handouts: handoutsTab, music: musicTab })[s.sideTab]()));
   }
 
   const online = (userId) => s.presence.some((p) => p.user_id === userId);
@@ -537,7 +661,9 @@ export async function render(root, tableId) {
     drawSheetPane();
     drawTray();
     drawFeed();
+    drawChatTo();
     drawSide();
+    if (s.sideTab === 'notes') notes.refresh();
     drawPresence();
   }
   drawAll();
@@ -555,10 +681,13 @@ export async function render(root, tableId) {
       applyState();
       if (isST) drawSide();
     })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `table_id=eq.${tableId}` }, ({ new: m }) => addMessage(m, true))
+    // a deleted row carries only its id, so this hears every table's deletions and ignores the rest
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, ({ old }) => { if (old?.id && s.messages.delete(old.id)) drawFeed(); })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'seats', filter: `table_id=eq.${tableId}` }, async () => {
       await loadRoster().catch(() => {});
       if (!isST && !mySeat()) { toast('You are no longer seated at this table.'); go(`#/c/${chronicleId}`); return; }
-      drawSheetPane(); drawTray(); drawSide();
+      drawSheetPane(); drawTray(); drawSide(); drawChatTo();
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'reveals' }, () => refreshLibrary().catch(() => {}))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'npcs', filter: `chronicle_id=eq.${chronicleId}` }, () => refreshLibrary().catch(() => {}))
@@ -592,6 +721,7 @@ export async function render(root, tableId) {
     document.removeEventListener('visibilitychange', onVisible);
     fit.disconnect();
     sheet?.destroy();
+    notes.destroy();
     music.destroy();
     sb.removeChannel(channel);
   };

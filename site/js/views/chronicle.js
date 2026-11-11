@@ -8,9 +8,10 @@ import { blankSheet, youtubeId } from '../v5.js';
 import { mediaImg, mediaUrl, dataUrlToFile, prepareImage, uploadMedia, removeChronicleMedia } from '../media.js';
 import { npcCard, editNpc, editHandout, openHandout, HANDOUT_ICON } from '../library.js';
 import { revealControl, revealsByItem } from '../reveal.js';
+import { notesPanel } from '../notes.js';
 
 const TABS = [
-  ['tables', 'Tables'], ['characters', 'Characters'], ['npcs', 'NPCs', true], ['handouts', 'Handouts', true],
+  ['tables', 'Tables'], ['characters', 'Characters'], ['notes', 'Notes'], ['npcs', 'NPCs', true], ['handouts', 'Handouts', true],
   ['music', 'Music', true], ['members', 'Members'], ['settings', 'Settings', true],
 ];
 
@@ -38,11 +39,21 @@ export async function render(root, chronicleId, tab = 'tables') {
         el('a', { href: `#/c/${chronicleId}/${key}`, role: 'tab', class: key === tab ? 'active' : '', 'aria-selected': String(key === tab) }, label))),
       panel));
 
-  const views = { tables, characters, npcs, handouts, music, members: membersTab, settings };
+  const views = { tables, characters, notes: notesTab, npcs, handouts, music, members: membersTab, settings };
   const draw = async () => {
     try { panel.replaceChildren(await views[tab](ctx, draw)); } catch (err) { fail(err); }
   };
   await draw();
+}
+
+// ---------- Notes ----------
+
+async function notesTab(ctx) {
+  const panel = notesPanel(ctx.chronicle);
+  await panel.refresh();
+  return el('div', { class: 'stack notes-page' },
+    el('p', { class: 'muted small' }, `Your own notes for this chronicle, saved as you type. Nobody else can read them, ${ctx.isST ? 'players and other storytellers included' : 'not even the storyteller'}. At a table they are in the Notes tab.`),
+    panel.node);
 }
 
 // ---------- Tables ----------
