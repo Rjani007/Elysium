@@ -127,7 +127,7 @@ export async function render(root, tableId) {
     onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); } },
     oninput: () => fitChatInput(),
   });
-  const chatTo = el('select', { class: 'chat-to', 'aria-label': 'Send to', title: 'Who reads it', onchange: () => drawWhisper() });
+  const chatTo = el('select', { class: 'chat-to', 'aria-label': 'Send to', title: 'Send to', onchange: () => drawWhisper() });
   const chatForm = el('form', { class: 'chat-form', onsubmit: (e) => { e.preventDefault(); sendMessage(); } },
     chatTo, chatInput, el('button', { class: 'btn btn-small', type: 'submit' }, 'Send'));
   const notes = notesPanel(chronicleId);
@@ -461,6 +461,10 @@ export async function render(root, tableId) {
     return r ? r.character_name || r.display_name : 'someone';
   }
 
+  // A storyteller also reads the whispers between players (the messages policy). Only their
+  // own screen says so: players see nothing that tells them who else reads a whisper.
+  const overheard = (m) => m.to_user && m.user_id !== me.id && m.to_user !== me.id;
+
   function chatLine(m) {
     const mine = m.user_id === me.id;
     const whisper = m.to_user ? (m.to_user === me.id ? 'whispers to you' : `to ${personName(m.to_user)}`) : '';
@@ -469,7 +473,10 @@ export async function render(root, tableId) {
         el('span', { class: 'chat-who' }, m.character_name || m.who),
         m.character_name ? el('span', { class: 'muted small' }, m.who) : null,
         isStoryteller(m.user_id) ? el('span', { class: 'chat-st' }, 'Storyteller') : null,
-        whisper ? el('span', { class: 'chat-to-label' }, `🔒 ${whisper}`) : null,
+        whisper ? el('span', {
+          class: 'chat-to-label',
+          title: overheard(m) ? 'A whisper between players: storytellers see every whisper, players only their own.' : null,
+        }, `🔒 ${whisper}`) : null,
         el('span', { class: 'chat-meta' },
           el('time', { class: 'chat-time', datetime: m.created_at }, fmtTime(m.created_at)),
           mine || isST ? el('button', { class: 'chat-del', type: 'button', title: 'Delete this message', 'aria-label': 'Delete this message', onclick: () => deleteMessage(m) }, '×') : null)),
@@ -489,7 +496,7 @@ export async function render(root, tableId) {
     chatTo.value = people.some(([id]) => id === keep) ? keep : '';
     drawWhisper();
   }
-  // a whisper stays picked for the next message too, so the box says plainly who will read it
+  // a whisper stays picked for the next message too, so the box says plainly who it goes to
   function drawWhisper() {
     chatInput.placeholder = chatTo.value ? `Whisper to ${personName(chatTo.value)}…` : 'Message the table…';
     chatForm.classList.toggle('whispering', !!chatTo.value);
@@ -527,7 +534,12 @@ export async function render(root, tableId) {
   }
 
   async function deleteMessage(m) {
-    if (!await confirmDialog(m.user_id === me.id ? 'Delete your message?' : `Delete this message from ${m.character_name || m.who}?`, { ok: 'Delete', danger: true })) return;
+    const from = m.character_name || m.who;
+    const question = m.user_id === me.id ? 'Delete your message?'
+      // it vanishes from both players' feeds, which gives away who else reads whispers
+      : overheard(m) ? `Delete this whisper from ${from} to ${personName(m.to_user)}? It disappears for both of them, which may show them that storytellers read whispers.`
+      : `Delete this message from ${from}?`;
+    if (!await confirmDialog(question, { ok: 'Delete', danger: true })) return;
     try {
       await q(sb.from('messages').delete().eq('id', m.id));
       s.messages.delete(m.id);

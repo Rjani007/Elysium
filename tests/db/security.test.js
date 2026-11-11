@@ -213,8 +213,8 @@ test('notes are private to their author, storytellers included', async () => {
   await refused(ana.client.from('notes').insert({ chronicle_id: chronicle, title: 'One too many' }), /200 notes/);
 });
 
-test('chat: the table reads it, a whisper only its two people, and only send_message writes it', async () => {
-  const { st, chronicle, table, players: [ana, ben] } = await chronicleWith(['Ana', 'Ben']);
+test('chat: the table reads it, a whisper its two people and the storytellers, and only send_message writes it', async () => {
+  const { st, chronicle, table, players: [ana, ben, dee] } = await chronicleWith(['Ana', 'Ben', 'Dee']);
   const table2 = await rpc(st, 'create_table', { p_chronicle: chronicle, p_name: 'Side table' });
   const [inv2] = await rows(st, 'table_invites', (q) => q.eq('table_id', table2));
   const cal = await newUser('Cal');
@@ -228,11 +228,13 @@ test('chat: the table reads it, a whisper only its two people, and only send_mes
   assert.equal(hello.character_name, 'Rosa', 'a message carries the character played at this table');
   const toSt = await rpc(ana, 'send_message', { p_table: table, p_body: 'I use Auspex on him.', p_to: st.id });
   const toBen = await rpc(st, 'send_message', { p_table: table, p_body: 'You feel watched.', p_to: ben.id });
+  const aside = await rpc(ana, 'send_message', { p_table: table, p_body: 'Meet me by the stairs.', p_to: ben.id });
 
   const ids = async (u) => (await rows(u, 'messages', (q) => q.eq('table_id', table))).map((m) => m.id).sort();
-  assert.deepEqual(await ids(ana), [hello.id, toSt.id].sort());
-  assert.deepEqual(await ids(ben), [hello.id, toBen.id].sort());
-  assert.deepEqual(await ids(st), [hello.id, toSt.id, toBen.id].sort(), 'the storyteller reads the whispers sent to or by them');
+  assert.deepEqual(await ids(ana), [hello.id, toSt.id, aside.id].sort());
+  assert.deepEqual(await ids(ben), [hello.id, toBen.id, aside.id].sort());
+  assert.deepEqual(await ids(dee), [hello.id], 'other players read only what is open');
+  assert.deepEqual(await ids(st), [hello.id, toSt.id, toBen.id, aside.id].sort(), 'the storyteller reads every whisper at the table');
   assert.equal((await rows(cal, 'messages')).length, 0, 'another table hears nothing');
 
   await refused(rpc(ana, 'send_message', { p_table: table, p_body: 'psst', p_to: cal.id }), /isn't at this table/);
@@ -246,8 +248,11 @@ test('chat: the table reads it, a whisper only its two people, and only send_mes
   assert.ok((await ids(ana)).includes(hello.id), 'a player can\'t delete someone else\'s message');
   const mine = await rpc(ben, 'send_message', { p_table: table, p_body: 'Oops' });
   await ben.client.from('messages').delete().eq('id', mine.id);
+  await ben.client.from('messages').delete().eq('id', aside.id);
+  assert.ok((await ids(ana)).includes(aside.id), 'a whisper\'s recipient can\'t delete it');
   await st.client.from('messages').delete().eq('id', hello.id);
-  assert.deepEqual(await ids(ben), [toBen.id], 'senders delete their own, storytellers anyone\'s');
+  await st.client.from('messages').delete().eq('id', aside.id);
+  assert.deepEqual(await ids(ben), [toBen.id], 'senders delete their own, storytellers anyone\'s, whispers included');
 });
 
 test('chat refuses a flood', async () => {

@@ -54,28 +54,31 @@ test('live roll updates respect private rolls and tables', async () => {
   await ben.client.removeAllChannels();
 });
 
-test('live chat keeps whispers to their two people and to the table', async () => {
-  const { st, chronicle, table, players: [ana, ben] } = await chronicleWith(['Ana', 'Ben']);
+test('live chat sends a whisper to its two people and the storytellers, the rest only what is open', async () => {
+  const { st, chronicle, table, players: [ana, ben, dee] } = await chronicleWith(['Ana', 'Ben', 'Dee']);
   const table2 = await rpc(st, 'create_table', { p_chronicle: chronicle, p_name: 'Other' });
   const [inv2] = await rows(st, 'table_invites', (q) => q.eq('table_id', table2));
   const cal = await newUser('Cal');
   await rpc(cal, 'join_table', { p_code: inv2.code });
 
   const seen = (u) => ({ user: u, seen: [], filters: { messages: u === cal ? null : `table_id=eq.${table}` } });
-  const watchers = [seen(ana), seen(ben), seen(cal)];
+  const [wAna, wBen, wDee, wCal, wSt] = [seen(ana), seen(ben), seen(dee), seen(cal), seen(st)];
   const subs = [];
-  for (const w of watchers) subs.push(await listen(w.user, w));
+  for (const w of [wAna, wBen, wDee, wCal, wSt]) subs.push(await listen(w.user, w));
   await wait(1500);
 
   const open = await rpc(st, 'send_message', { p_table: table, p_body: 'The doors open.' });
   const whisper = await rpc(st, 'send_message', { p_table: table, p_body: 'Only you notice the blood.', p_to: ana.id });
+  const aside = await rpc(ana, 'send_message', { p_table: table, p_body: 'Did you see his hands?', p_to: ben.id });
   await wait(2500);
 
   const got = (w) => w.seen.filter((e) => e.type === 'INSERT').map((e) => e.row.id).sort();
-  assert.deepEqual(got(watchers[0]), [open.id, whisper.id].sort(), 'the whisper reaches its recipient');
-  assert.deepEqual(got(watchers[1]), [open.id], 'the rest of the table gets only what is open');
-  assert.deepEqual(got(watchers[2]), [], 'another table hears nothing');
+  assert.deepEqual(got(wAna), [open.id, whisper.id, aside.id].sort(), 'a whisper reaches its recipient and its sender');
+  assert.deepEqual(got(wBen), [open.id, aside.id].sort());
+  assert.deepEqual(got(wDee), [open.id], 'the rest of the table gets only what is open');
+  assert.deepEqual(got(wCal), [], 'another table hears nothing');
+  assert.deepEqual(got(wSt), [open.id, whisper.id, aside.id].sort(), 'the storyteller hears every whisper');
 
   for (const s of subs) await s.unsubscribe();
-  for (const u of [ana, ben, cal]) await u.client.removeAllChannels();
+  for (const u of [ana, ben, dee, cal, st]) await u.client.removeAllChannels();
 });
